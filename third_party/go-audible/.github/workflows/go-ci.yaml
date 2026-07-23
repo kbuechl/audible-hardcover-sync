@@ -1,0 +1,68 @@
+name: CI
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    name: Go Test
+    runs-on: ubuntu-latest
+    env:
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod-cache
+      GOCACHE: ${{ github.workspace }}/.cache/go-build-cache
+      GOFLAGS: -modcacherw
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.4'
+
+      - name: Prepare Go cache directories
+        run: |
+          mkdir -p "$GOMODCACHE" "$GOCACHE"
+          # Best-effort cleanup of stale writable artifacts only.
+          # Go modules in mod cache are often read-only by design.
+          find "$GOCACHE" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true
+
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run go test with coverage (80% threshold)
+        run: |
+          go test -coverprofile=coverage.out ./.
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage ($COVERAGE%) is below threshold (80%)"
+            exit 1
+          fi
+
+
+      - name: Run go test race
+        run: go test -race ./.
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --timeout 5m --path-mode=abs ./
+          working-directory: .
