@@ -284,6 +284,163 @@ func TestClient_do_Unauthorized(t *testing.T) {
 	}
 }
 
+func TestClient_SearchBooks(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if !strings.Contains(query, "search(") {
+			t.Fatalf("expected a search() query, got: %s", query)
+		}
+		return map[string]any{
+			"search": map[string]any{
+				"results": map[string]any{
+					"found": 1,
+					"hits": []map[string]any{
+						{
+							"document": map[string]any{
+								"id":           "192946",
+								"title":        "A Court of Thorns and Roses",
+								"author_names": []string{"Sarah J. Maas"},
+								"isbns":        []string{"9781635575569"},
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	})
+
+	results, err := c.SearchBooks(context.Background(), "court of thorns and roses", 5)
+	if err != nil {
+		t.Fatalf("SearchBooks() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %v, want 1", results)
+	}
+	if results[0].ID != 192946 {
+		t.Errorf("ID = %d, want 192946", results[0].ID)
+	}
+	if results[0].Title != "A Court of Thorns and Roses" {
+		t.Errorf("Title = %q", results[0].Title)
+	}
+	if len(results[0].AuthorNames) != 1 || results[0].AuthorNames[0] != "Sarah J. Maas" {
+		t.Errorf("AuthorNames = %v", results[0].AuthorNames)
+	}
+}
+
+// TestClient_SearchBooks_Table covers the success case above plus edge
+// cases a reviewer would expect: a GraphQL-level error propagating, a
+// malformed hit (non-numeric id) being skipped rather than failing the
+// whole search, and an empty hit list producing an empty (non-nil) slice.
+func TestClient_SearchBooks_Table(t *testing.T) {
+	tests := []struct {
+		name      string
+		reply     func() (any, error)
+		wantLen   int
+		wantErr   bool
+		wantTitle string
+	}{
+		{
+			name: "success",
+			reply: func() (any, error) {
+				return map[string]any{
+					"search": map[string]any{
+						"results": map[string]any{
+							"found": 1,
+							"hits": []map[string]any{
+								{"document": map[string]any{
+									"id": "1", "title": "Book One",
+									"author_names": []string{"Author One"},
+									"isbns":        []string{"111"},
+								}},
+							},
+						},
+					},
+				}, nil
+			},
+			wantLen:   1,
+			wantTitle: "Book One",
+		},
+		{
+			name: "graphql error",
+			reply: func() (any, error) {
+				return nil, errors.New("search backend unavailable")
+			},
+			wantErr: true,
+		},
+		{
+			// "1.5" is a syntactically valid JSON number (so the outer
+			// json.Unmarshal into json.Number succeeds), but it is not a
+			// whole number, so Document.ID.Int64() fails on it — this
+			// exercises the per-hit skip in SearchBooks, as opposed to a
+			// document whose "id" isn't valid JSON number syntax at all
+			// (that would fail the whole json.Unmarshal, not per-hit).
+			name: "malformed id is skipped, not fatal",
+			reply: func() (any, error) {
+				return map[string]any{
+					"search": map[string]any{
+						"results": map[string]any{
+							"found": 2,
+							"hits": []map[string]any{
+								{"document": map[string]any{
+									"id": "1.5", "title": "Bad Hit",
+									"author_names": []string{}, "isbns": []string{},
+								}},
+								{"document": map[string]any{
+									"id": "2", "title": "Good Hit",
+									"author_names": []string{}, "isbns": []string{},
+								}},
+							},
+						},
+					},
+				}, nil
+			},
+			wantLen:   1,
+			wantTitle: "Good Hit",
+		},
+		{
+			name: "no hits returns empty slice",
+			reply: func() (any, error) {
+				return map[string]any{
+					"search": map[string]any{
+						"results": map[string]any{
+							"found": 0,
+							"hits":  []map[string]any{},
+						},
+					},
+				}, nil
+			},
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+				return tt.reply()
+			})
+
+			results, err := c.SearchBooks(context.Background(), "some query", 5)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("SearchBooks() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SearchBooks() error = %v, want nil", err)
+			}
+			if results == nil {
+				t.Error("results = nil, want non-nil (possibly empty) slice")
+			}
+			if len(results) != tt.wantLen {
+				t.Fatalf("len(results) = %d, want %d", len(results), tt.wantLen)
+			}
+			if tt.wantLen > 0 && results[0].Title != tt.wantTitle {
+				t.Errorf("results[0].Title = %q, want %q", results[0].Title, tt.wantTitle)
+			}
+		})
+	}
+}
+
 // TestClient_do_NonGraphQLErrorStatusWithNilOut reproduces the real
 // Hardcover auth-failure shape ({"error": "..."} — no "errors" array, HTTP
 // 401) via a call path where out == nil, exactly matching how UpsertUserBook

@@ -155,6 +155,57 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn string) (bookID int64,
 	return out.Editions[0].BookID, true, nil
 }
 
+type SearchResult struct {
+	ID          int64
+	Title       string
+	AuthorNames []string
+	ISBNs       []string
+}
+
+// SearchBooks does a fuzzy Typesense-backed search, for the manual-match
+// web UI only. The automated sync path never calls this — it uses the
+// deterministic FindBookByISBN instead.
+func (c *Client) SearchBooks(ctx context.Context, query string, perPage int) ([]SearchResult, error) {
+	var out struct {
+		Search struct {
+			Results struct {
+				Hits []struct {
+					Document struct {
+						ID          json.Number `json:"id"`
+						Title       string      `json:"title"`
+						AuthorNames []string    `json:"author_names"`
+						ISBNs       []string    `json:"isbns"`
+					} `json:"document"`
+				} `json:"hits"`
+			} `json:"results"`
+		} `json:"search"`
+	}
+
+	gqlQuery := `query SearchBooks($query: String!, $perPage: Int!) {
+		search(query: $query, query_type: "Book", per_page: $perPage) {
+			results
+		}
+	}`
+	if err := c.do(ctx, gqlQuery, map[string]any{"query": query, "perPage": perPage}, &out); err != nil {
+		return nil, fmt.Errorf("search books: %w", err)
+	}
+
+	results := make([]SearchResult, 0, len(out.Search.Results.Hits))
+	for _, hit := range out.Search.Results.Hits {
+		id, err := hit.Document.ID.Int64()
+		if err != nil {
+			continue // skip malformed entries rather than failing the whole search
+		}
+		results = append(results, SearchResult{
+			ID:          id,
+			Title:       hit.Document.Title,
+			AuthorNames: hit.Document.AuthorNames,
+			ISBNs:       hit.Document.ISBNs,
+		})
+	}
+	return results, nil
+}
+
 // UpsertUserBook sets the reading status (and, if non-nil, rating) for a
 // book in the authenticated user's Hardcover library. It queries for an
 // existing user_books row first because insert_user_book errors on a
