@@ -6,6 +6,7 @@ package audible
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	audiblesdk "github.com/mstrhakr/go-audible"
@@ -34,6 +35,18 @@ type Client struct {
 
 func New(marketplace audiblesdk.Marketplace) *Client {
 	return &Client{sdk: audiblesdk.NewClient(marketplace)}
+}
+
+// newWithHTTP is the same as New but injects a custom *http.Client, so
+// tests can point requests at an httptest.Server instead of the real
+// Audible API. Unexported: production code always uses New. Not yet used by
+// a test in this package — replicating the vendored SDK's real
+// request-signing and credential-refresh internals in a hand-rolled mock
+// risks a low-value, fragile test that verifies mock behavior rather than
+// real behavior. It's added now so a future task can add a real
+// mocked-network test for Authenticate/FetchLibrary cheaply.
+func newWithHTTP(marketplace audiblesdk.Marketplace, httpClient *http.Client) *Client {
+	return &Client{sdk: audiblesdk.NewClientWithHTTP(marketplace, httpClient)}
 }
 
 func (c *Client) IsAuthenticated() bool {
