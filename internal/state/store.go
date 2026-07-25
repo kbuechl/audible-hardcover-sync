@@ -18,6 +18,8 @@ const (
 
 type BookState struct {
 	ASIN              string
+	Title             string
+	Author            string
 	Status            Status
 	PercentComplete   float64
 	Rating            *float64
@@ -34,6 +36,8 @@ type Store struct {
 const schema = `
 CREATE TABLE IF NOT EXISTS sync_state (
     asin TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    author TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL,
     percent_complete REAL NOT NULL DEFAULT 0,
     rating REAL,
@@ -61,7 +65,7 @@ func (s *Store) Close() error {
 
 func (s *Store) Get(asin string) (*BookState, error) {
 	row := s.db.QueryRow(`
-		SELECT asin, status, percent_complete, rating, hardcover_book_id,
+		SELECT asin, title, author, status, percent_complete, rating, hardcover_book_id,
 		       unmatched, notified_unmatched, updated_at
 		FROM sync_state WHERE asin = ?`, asin)
 
@@ -71,7 +75,7 @@ func (s *Store) Get(asin string) (*BookState, error) {
 	var hardcoverBookID sql.NullInt64
 	var unmatched, notified int
 
-	err := row.Scan(&bs.ASIN, &bs.Status, &bs.PercentComplete, &rating, &hardcoverBookID,
+	err := row.Scan(&bs.ASIN, &bs.Title, &bs.Author, &bs.Status, &bs.PercentComplete, &rating, &hardcoverBookID,
 		&unmatched, &notified, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -98,9 +102,11 @@ func (s *Store) Get(asin string) (*BookState, error) {
 func (s *Store) Upsert(bs BookState) error {
 	_, err := s.db.Exec(`
 		INSERT INTO sync_state
-			(asin, status, percent_complete, rating, hardcover_book_id, unmatched, notified_unmatched, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			(asin, title, author, status, percent_complete, rating, hardcover_book_id, unmatched, notified_unmatched, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(asin) DO UPDATE SET
+			title = excluded.title,
+			author = excluded.author,
 			status = excluded.status,
 			percent_complete = excluded.percent_complete,
 			rating = excluded.rating,
@@ -108,7 +114,7 @@ func (s *Store) Upsert(bs BookState) error {
 			unmatched = excluded.unmatched,
 			notified_unmatched = excluded.notified_unmatched,
 			updated_at = excluded.updated_at`,
-		bs.ASIN, bs.Status, bs.PercentComplete, bs.Rating, bs.HardcoverBookID,
+		bs.ASIN, bs.Title, bs.Author, bs.Status, bs.PercentComplete, bs.Rating, bs.HardcoverBookID,
 		boolToInt(bs.Unmatched), boolToInt(bs.NotifiedUnmatched), time.Now().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("upsert %q: %w", bs.ASIN, err)
@@ -118,7 +124,7 @@ func (s *Store) Upsert(bs BookState) error {
 
 func (s *Store) ListUnmatched() ([]BookState, error) {
 	rows, err := s.db.Query(`
-		SELECT asin, status, percent_complete, rating, hardcover_book_id,
+		SELECT asin, title, author, status, percent_complete, rating, hardcover_book_id,
 		       unmatched, notified_unmatched, updated_at
 		FROM sync_state WHERE unmatched = 1`)
 	if err != nil {
@@ -134,7 +140,7 @@ func (s *Store) ListUnmatched() ([]BookState, error) {
 		var hardcoverBookID sql.NullInt64
 		var unmatched, notified int
 
-		if err := rows.Scan(&bs.ASIN, &bs.Status, &bs.PercentComplete, &rating, &hardcoverBookID,
+		if err := rows.Scan(&bs.ASIN, &bs.Title, &bs.Author, &bs.Status, &bs.PercentComplete, &rating, &hardcoverBookID,
 			&unmatched, &notified, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan unmatched row: %w", err)
 		}

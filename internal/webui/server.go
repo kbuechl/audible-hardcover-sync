@@ -60,6 +60,30 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	asin := r.PathValue("asin")
 	query := r.URL.Query().Get("q")
+	hasQueryParam := r.URL.Query().Has("q")
+
+	item, err := s.store.Get(asin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var title, author string
+	if item != nil {
+		title = item.Title
+		author = item.Author
+	}
+
+	// Prefill the search box's displayed value from the Audible item's title
+	// (per the design spec's "prefilled from the Audible item" requirement)
+	// on first load only — i.e. when the caller hasn't supplied a ?q= at
+	// all. This deliberately does NOT trigger an automatic search: an empty
+	// ?q= (or none) must still skip calling the searcher, exactly as before
+	// — the prefill only changes what's shown in the input box.
+	prefill := query
+	if !hasQueryParam && title != "" {
+		prefill = title
+	}
 
 	var results []hardcover.SearchResult
 	if query != "" {
@@ -73,7 +97,10 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 
 	if err := templates.ExecuteTemplate(w, "unmatched_detail.html", map[string]any{
 		"ASIN":    asin,
+		"Title":   title,
+		"Author":  author,
 		"Query":   query,
+		"Prefill": prefill,
 		"Results": results,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -92,16 +119,15 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.store.Get(asin)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// Deliberately do NOT carry forward existing.Status/PercentComplete here.
+	// Status is left at its zero value ("") so that sync.Run's
+	// unchanged-skip check (prior.Status == newly-computed status) can never
+	// match a real state.Status constant, which forces the next sync pass to
+	// treat this book as changed and actually call Hardcover.UpsertUserBook
+	// using the HardcoverBookID cached here. Preserving the prior Status
+	// used to make a freshly-resolved book look "unchanged" on the very next
+	// run, so it silently never got synced to Hardcover.
 	bs := state.BookState{ASIN: asin, HardcoverBookID: &bookID, Unmatched: false, NotifiedUnmatched: false}
-	if existing != nil {
-		bs.Status = existing.Status
-		bs.PercentComplete = existing.PercentComplete
-	}
 	if err := s.store.Upsert(bs); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -49,6 +49,8 @@ func TestStore_UpsertAndGet(t *testing.T) {
 			name: "populated fields round-trip",
 			in: BookState{
 				ASIN:            "B00WRHY15Y",
+				Title:           "The Hobbit",
+				Author:          "J.R.R. Tolkien",
 				Status:          StatusFinished,
 				PercentComplete: 100,
 				Rating:          &rating,
@@ -57,6 +59,12 @@ func TestStore_UpsertAndGet(t *testing.T) {
 			check: func(t *testing.T, got *BookState) {
 				if got.Status != StatusFinished {
 					t.Errorf("Status = %q, want %q", got.Status, StatusFinished)
+				}
+				if got.Title != "The Hobbit" {
+					t.Errorf("Title = %q, want %q", got.Title, "The Hobbit")
+				}
+				if got.Author != "J.R.R. Tolkien" {
+					t.Errorf("Author = %q, want %q", got.Author, "J.R.R. Tolkien")
 				}
 				if got.HardcoverBookID == nil || *got.HardcoverBookID != bookID {
 					t.Errorf("HardcoverBookID = %v, want %d", got.HardcoverBookID, bookID)
@@ -81,6 +89,12 @@ func TestStore_UpsertAndGet(t *testing.T) {
 				}
 				if got.HardcoverBookID != nil {
 					t.Errorf("HardcoverBookID = %v, want nil", got.HardcoverBookID)
+				}
+				if got.Title != "" {
+					t.Errorf("Title = %q, want empty string when not set", got.Title)
+				}
+				if got.Author != "" {
+					t.Errorf("Author = %q, want empty string when not set", got.Author)
 				}
 			},
 		},

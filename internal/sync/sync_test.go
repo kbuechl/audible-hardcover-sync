@@ -159,7 +159,7 @@ func TestRun(t *testing.T) {
 		{
 			name: "no ISBN marks unmatched and notifies",
 			items: []audible.LibraryItem{
-				{ASIN: "A5", IsFinished: true, PercentComplete: 100}, // no ISBN13/ISBN10
+				{ASIN: "A5", Title: "Some Title", Author: "Some Author", IsFinished: true, PercentComplete: 100}, // no ISBN13/ISBN10
 			},
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
 				if result.Unmatched != 1 {
@@ -171,6 +171,9 @@ func TestRun(t *testing.T) {
 				}
 				if bs == nil || !bs.Unmatched {
 					t.Errorf("stored state = %+v, want Unmatched=true", bs)
+				}
+				if bs != nil && (bs.Title != "Some Title" || bs.Author != "Some Author") {
+					t.Errorf("stored state Title/Author = %q/%q, want %q/%q (persisted for the manual-match web UI)", bs.Title, bs.Author, "Some Title", "Some Author")
 				}
 				if len(fn.notified) != 1 || fn.notified[0].ASIN != "A5" {
 					t.Errorf("notified = %+v, want one entry for A5", fn.notified)
@@ -218,6 +221,45 @@ func TestRun(t *testing.T) {
 				}
 				if got.statusID != 3 {
 					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+				}
+			},
+		},
+		{
+			// Regression test for the Critical finding: webui.handleResolve
+			// writes a state row with a cached HardcoverBookID but Status
+			// left at its zero value ("") — see internal/webui/server.go's
+			// handleResolve. This case seeds exactly that shape and proves
+			// the next sync pass does NOT treat it as unchanged (since ""
+			// can never equal a real state.Status constant) and instead
+			// reuses the cached HardcoverBookID to make a real
+			// UpsertUserBook call, so a manually-resolved book actually
+			// gets synced to Hardcover.
+			name: "webui-resolved state (empty status) is synced, not skipped as unchanged",
+			items: []audible.LibraryItem{
+				{ASIN: "A9", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
+			},
+			// byISBN intentionally left empty: if resolveBookID incorrectly
+			// re-resolved via FindBookByISBN instead of reusing the cached
+			// HardcoverBookID, this item would fail to match and end up
+			// unmatched instead of synced.
+			seed: &state.BookState{ASIN: "A9", Status: "", HardcoverBookID: int64Ptr(777), Unmatched: false},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Errorf("Synced = %d, want 1 (must not be skipped as unchanged)", result.Synced)
+				}
+				got, ok := fh.upserted[777]
+				if !ok {
+					t.Fatalf("upserted = %v, want an entry for cached book id 777", fh.upserted)
+				}
+				if got.statusID != 3 {
+					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+				}
+				bs, err := store.Get("A9")
+				if err != nil {
+					t.Fatalf("store.Get() error = %v", err)
+				}
+				if bs == nil || bs.Status != state.StatusFinished {
+					t.Errorf("stored state = %+v, want status finished after sync", bs)
 				}
 			},
 		},

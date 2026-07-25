@@ -9,7 +9,10 @@
 {{else}}
 <ul>
 {{range .Items}}
-  <li><a href="/unmatched/{{.ASIN}}">{{.ASIN}}</a> — status: {{.Status}}</li>
+  <li>
+    <a href="/unmatched/{{.ASIN}}">{{if .Title}}{{.Title}}{{if .Author}} by {{.Author}}{{end}}{{else}}{{.ASIN}}{{end}}</a>
+    — ASIN: {{.ASIN}}, status: {{.Status}}
+  </li>
 {{end}}
 </ul>
 {{end}}

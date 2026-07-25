@@ -59,6 +59,43 @@ func TestUnmatchedList_ShowsUnmatchedBooks(t *testing.T) {
 	}
 }
 
+// TestUnmatchedList_ShowsTitleAndAuthor verifies the list page surfaces the
+// Audible item's title/author (per the design spec's "title, author, cover,
+// Audible link" requirement) instead of only the bare ASIN, while still
+// keeping the ASIN available (e.g. as a secondary detail) so the working
+// link/lookup isn't regressed.
+func TestUnmatchedList_ShowsTitleAndAuthor(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.Upsert(state.BookState{
+		ASIN: "A1", Title: "Some Book", Author: "Some Author",
+		Status: state.StatusFinished, Unmatched: true,
+	}); err != nil {
+		t.Fatalf("seed error = %v", err)
+	}
+
+	srv := New(store, &fakeSearcher{})
+	req := httptest.NewRequest(http.MethodGet, "/unmatched", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Some Book") {
+		t.Errorf("body does not show item title: %s", body)
+	}
+	if !strings.Contains(body, "Some Author") {
+		t.Errorf("body does not show item author: %s", body)
+	}
+	if !strings.Contains(body, "A1") {
+		t.Errorf("body does not still mention ASIN A1: %s", body)
+	}
+	if !strings.Contains(body, `href="/unmatched/A1"`) {
+		t.Errorf("body does not link to /unmatched/A1: %s", body)
+	}
+}
+
 // TestUnmatchedList_EmptyStateMessage verifies the "nothing to resolve"
 // branch of the template renders when there are no unmatched books, rather
 // than an empty (and possibly confusing) list.
@@ -166,6 +203,67 @@ func TestUnmatchedDetail_SearchError(t *testing.T) {
 	}
 }
 
+// TestUnmatchedDetail_PrefillsSearchFromItemTitle verifies that visiting the
+// detail page with no ?q= query string prefills the search box with the
+// Audible item's title (per the design spec's "prefilled from the Audible
+// item" requirement) rather than leaving it blank, while still not firing an
+// automatic search request to Hardcover — the prefill only affects what's
+// shown in the input, not an implicit submit.
+func TestUnmatchedDetail_PrefillsSearchFromItemTitle(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.Upsert(state.BookState{
+		ASIN: "A1", Title: "Some Book", Author: "Some Author",
+		Status: state.StatusFinished, Unmatched: true,
+	}); err != nil {
+		t.Fatalf("seed error = %v", err)
+	}
+	searcher := &fakeSearcher{results: []hardcover.SearchResult{{ID: 777, Title: "Should Not Appear"}}}
+
+	srv := New(store, searcher)
+	req := httptest.NewRequest(http.MethodGet, "/unmatched/A1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `value="Some Book"`) {
+		t.Errorf("body does not prefill the search box with the item title: %s", body)
+	}
+	if len(searcher.calls) != 0 {
+		t.Errorf("searcher.calls = %v, want no automatic search from prefill alone", searcher.calls)
+	}
+	if !strings.Contains(body, "Some Book") || !strings.Contains(body, "Some Author") {
+		t.Errorf("body does not display item title/author near the top: %s", body)
+	}
+}
+
+// TestUnmatchedDetail_ExplicitEmptyQueryDoesNotReprefill verifies that once
+// the user has explicitly searched (even submitting an empty query), the
+// title prefill does not clobber that explicit choice.
+func TestUnmatchedDetail_ExplicitEmptyQueryDoesNotReprefill(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.Upsert(state.BookState{
+		ASIN: "A1", Title: "Some Book", Author: "Some Author",
+		Status: state.StatusFinished, Unmatched: true,
+	}); err != nil {
+		t.Fatalf("seed error = %v", err)
+	}
+
+	srv := New(store, &fakeSearcher{})
+	req := httptest.NewRequest(http.MethodGet, "/unmatched/A1?q=", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `value=""`) {
+		t.Errorf("body should keep an explicit empty query rather than re-prefilling the title: %s", rec.Body.String())
+	}
+}
+
 // TestUnmatchedDetail_UnknownASIN verifies the detail page still renders
 // for an ASIN with no row in the store (e.g. a stale bookmarked link) —
 // the handler doesn't look the ASIN up before rendering the search form, so
@@ -219,8 +317,14 @@ func TestResolve_WritesHardcoverBookIDAndClearsUnmatched(t *testing.T) {
 	if bs.HardcoverBookID == nil || *bs.HardcoverBookID != 777 {
 		t.Errorf("HardcoverBookID = %v, want 777", bs.HardcoverBookID)
 	}
-	if bs.Status != state.StatusFinished {
-		t.Errorf("Status = %q, want %q (existing status preserved)", bs.Status, state.StatusFinished)
+	// Status must NOT be carried forward from the prior state (it was
+	// StatusFinished before resolve). Leaving it at the zero value ("")
+	// guarantees sync.Run's unchanged-skip check (prior.Status == newly
+	// computed status) cannot spuriously match on the next sync pass, so the
+	// freshly-resolved book is treated as changed and actually gets pushed
+	// to Hardcover via UpsertUserBook instead of being silently skipped.
+	if bs.Status != "" {
+		t.Errorf("Status = %q, want \"\" (zero value) so the next sync run treats this as changed and pushes to Hardcover", bs.Status)
 	}
 }
 

@@ -93,6 +93,8 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		if bookID == 0 {
 			bs := state.BookState{
 				ASIN:              item.ASIN,
+				Title:             item.Title,
+				Author:            item.Author,
 				Status:            status,
 				PercentComplete:   item.PercentComplete,
 				Unmatched:         true,
