@@ -171,6 +171,16 @@ func TestRun(t *testing.T) {
 				if len(fn.notified) != 1 || fn.notified[0].ASIN != "A5" {
 					t.Errorf("notified = %+v, want one entry for A5", fn.notified)
 				}
+				after, err := store.Get("A5")
+				if err != nil {
+					t.Fatalf("store.Get() error = %v", err)
+				}
+				if after == nil {
+					t.Fatalf("store.Get(\"A5\") = nil, want persisted state")
+				}
+				if !after.NotifiedUnmatched {
+					t.Errorf("NotifiedUnmatched = false after successful notify, want true (MarkNotified should have flipped it)")
+				}
 			},
 		},
 		{
@@ -182,6 +192,28 @@ func TestRun(t *testing.T) {
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
 				if len(fn.notified) != 0 {
 					t.Errorf("notified = %+v, want no re-notification", fn.notified)
+				}
+			},
+		},
+		{
+			name: "prior hardcover book id is reused without re-resolving by isbn",
+			items: []audible.LibraryItem{
+				{ASIN: "A8", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
+			},
+			// byISBN intentionally left empty: if resolveBookID incorrectly
+			// re-resolved via FindBookByISBN instead of reusing the cached
+			// HardcoverBookID, this item would fail to match.
+			seed: &state.BookState{ASIN: "A8", Status: state.StatusInProgress, HardcoverBookID: int64Ptr(777)},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Errorf("Synced = %d, want 1", result.Synced)
+				}
+				got, ok := fh.upserted[777]
+				if !ok {
+					t.Fatalf("upserted = %v, want an entry for book id 777", fh.upserted)
+				}
+				if got.statusID != 3 {
+					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
 				}
 			},
 		},
