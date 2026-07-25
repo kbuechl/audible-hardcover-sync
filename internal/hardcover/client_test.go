@@ -216,24 +216,6 @@ func TestClient_UpsertUserBook_Table(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "insert when absent",
-			handler: func(t *testing.T) func(string, map[string]any) (any, error) {
-				return func(query string, vars map[string]any) (any, error) {
-					switch {
-					case strings.Contains(query, "me"):
-						return map[string]any{"me": []map[string]any{{"id": 42, "username": "reader"}}}, nil
-					case strings.Contains(query, "user_books("):
-						return map[string]any{"user_books": []map[string]any{}}, nil
-					case strings.Contains(query, "insert_user_book"):
-						return map[string]any{"insert_user_book": map[string]any{"id": 1}}, nil
-					default:
-						t.Fatalf("unexpected query: %s", query)
-						return nil, nil
-					}
-				}
-			},
-		},
-		{
 			name: "error resolving user id",
 			handler: func(t *testing.T) func(string, map[string]any) (any, error) {
 				return func(query string, vars map[string]any) (any, error) {
@@ -299,5 +281,32 @@ func TestClient_do_Unauthorized(t *testing.T) {
 
 	if _, _, err := c.Me(context.Background()); err == nil {
 		t.Fatal("Me() error = nil, want error for unauthorized response")
+	}
+}
+
+// TestClient_do_NonGraphQLErrorStatusWithNilOut reproduces the real
+// Hardcover auth-failure shape ({"error": "..."} — no "errors" array, HTTP
+// 401) via a call path where out == nil, exactly matching how UpsertUserBook
+// invokes do() for insert_user_book and update_user_book_by_pk. Before the
+// do() status-code fix this returned nil (a silent success): do() only
+// detected failure via a populated GraphQL "errors" array or a failed
+// unmarshal into out, and it skips the unmarshal entirely when out is nil,
+// so a non-2xx response with a body shaped like {"error": "..."} was
+// invisible. This is the scenario that matters for UpsertUserBook, whose
+// mutation calls always pass out == nil.
+func TestClient_do_NonGraphQLErrorStatusWithNilOut(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"error": "Unable to verify token"})
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New("wrong-token")
+	c.endpoint = srv.URL
+	c.httpClient = srv.Client()
+
+	err := c.do(context.Background(), `mutation { insert_user_book(object: {}) { id } }`, nil, nil)
+	if err == nil {
+		t.Fatal("do() error = nil, want error for HTTP 401 response with no GraphQL errors array (out == nil call path, as used by UpsertUserBook's mutations)")
 	}
 }

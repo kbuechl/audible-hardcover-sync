@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -19,6 +20,9 @@ const (
 
 const defaultEndpoint = "https://api.hardcover.app/v1/graphql"
 
+// Client is not safe for concurrent use by multiple goroutines. In
+// particular, userIDCached lazily populates the userID field with no
+// synchronization, so sharing a single *Client across goroutines can race.
 type Client struct {
 	token      string
 	endpoint   string
@@ -69,8 +73,24 @@ func (c *Client) do(ctx context.Context, query string, variables map[string]any,
 	}
 	defer resp.Body.Close()
 
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read graphql response body (status %d): %w", resp.StatusCode, err)
+	}
+
+	// The GraphQL-spec "errors" array is not the only failure shape Hardcover
+	// uses: e.g. an auth failure is documented to return HTTP 401 with a
+	// bare {"error": "..."} body (no "errors" array). Checking the HTTP
+	// status here, before relying on gr.Errors or a successful unmarshal
+	// into out, ensures a non-2xx response is never mistaken for success —
+	// which matters most for callers (like UpsertUserBook's mutations) that
+	// pass out == nil and would otherwise have no other failure signal.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("graphql request failed: status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var gr gqlResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
+	if err := json.Unmarshal(respBody, &gr); err != nil {
 		return fmt.Errorf("decode graphql response (status %d): %w", resp.StatusCode, err)
 	}
 	if len(gr.Errors) > 0 {
