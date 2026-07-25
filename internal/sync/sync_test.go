@@ -11,10 +11,14 @@ import (
 )
 
 type fakeAudible struct {
-	items []audible.LibraryItem
+	items    []audible.LibraryItem
+	fetchErr error
 }
 
 func (f *fakeAudible) FetchLibrary(ctx context.Context) ([]audible.LibraryItem, error) {
+	if f.fetchErr != nil {
+		return nil, f.fetchErr
+	}
 	return f.items, nil
 }
 
@@ -255,5 +259,28 @@ func TestRun(t *testing.T) {
 
 			tt.check(t, store, fh, fn, result)
 		})
+	}
+}
+
+// TestRun_FetchLibraryError covers the one case where Run returns a non-nil
+// top-level error: a failure to fetch the Audible library at all. Unlike
+// per-book failures (Hardcover errors, store errors), this must short-circuit
+// the whole pass with nothing synced and no notification sent.
+func TestRun_FetchLibraryError(t *testing.T) {
+	wantErr := errors.New("audible unavailable")
+	fa := &fakeAudible{fetchErr: wantErr}
+	fh := newFakeHardcover()
+	store := newTestStore(t)
+	fn := &fakeNotifier{}
+
+	result, err := Run(context.Background(), Deps{Audible: fa, Hardcover: fh, Store: store, Notifier: fn})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run() error = %v, want it to wrap %v", err, wantErr)
+	}
+	if result != (Result{}) {
+		t.Errorf("Run() result = %+v, want zero value on fetch failure", result)
+	}
+	if len(fn.notified) != 0 {
+		t.Errorf("notified = %v, want no notifications sent on fetch failure", fn.notified)
 	}
 }

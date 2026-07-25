@@ -7,6 +7,7 @@ replace github.com/mstrhakr/go-audible => ./third_party/go-audible
 require (
 	github.com/containrrr/shoutrrr v0.8.0
 	github.com/mstrhakr/go-audible v0.2.7
+	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.54.0
 )
 

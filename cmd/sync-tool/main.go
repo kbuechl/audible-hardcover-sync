@@ -27,15 +27,26 @@ func main() {
 			fmt.Fprintln(os.Stderr, "auth failed:", err)
 			os.Exit(1)
 		}
-	case "sync", "serve":
+	case "sync":
 		cfg, err := config.Load()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "config error:", err)
 			os.Exit(1)
 		}
-		_ = cfg // wired up in Task 11
-		fmt.Fprintln(os.Stderr, os.Args[1], "not yet implemented")
-		os.Exit(1)
+		if _, err := runOnce(ctx, cfg); err != nil {
+			fmt.Fprintln(os.Stderr, "sync failed:", err)
+			os.Exit(1)
+		}
+	case "serve":
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "config error:", err)
+			os.Exit(1)
+		}
+		if err := runServe(ctx, cfg); err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			fmt.Fprintln(os.Stderr, "serve failed:", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintln(os.Stderr, "unknown subcommand:", os.Args[1])
 		os.Exit(1)
