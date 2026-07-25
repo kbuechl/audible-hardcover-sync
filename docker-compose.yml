@@ -1,0 +1,24 @@
+# docker-compose.yml
+services:
+  sync-tool:
+    build: .
+    restart: unless-stopped
+    environment:
+      HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN}
+      SYNC_INTERVAL: ${SYNC_INTERVAL:-6h}
+      PUBLIC_URL: ${PUBLIC_URL}
+      NOTIFY_URLS: ${NOTIFY_URLS:-}
+      WEB_UI_PORT: 8080
+      STATE_DB_PATH: /data/state.db
+      CREDENTIALS_PATH: /data/credentials.json
+    volumes:
+      - sync-data:/data
+    ports:
+      # Bind to the LAN interface only — this UI has no authentication.
+      # Replace 192.168.1.10 with your host's actual LAN IP, or remove the
+      # host-side address entirely only if this host is not reachable from
+      # the internet.
+      - "192.168.1.10:8080:8080"
+
+volumes:
+  sync-data:

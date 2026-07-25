@@ -1,0 +1,24 @@
+<!-- internal/webui/templates/unmatched_detail.html -->
+<!doctype html>
+<html>
+<head><title>Resolve {{if .Title}}{{.Title}}{{else}}{{.ASIN}}{{end}}</title></head>
+<body>
+<h1>{{if .Title}}{{.Title}}{{if .Author}} by {{.Author}}{{end}}{{else}}Resolve {{.ASIN}}{{end}}</h1>
+{{if .Title}}<p>ASIN: {{.ASIN}}</p>{{end}}
+<form method="get" action="/unmatched/{{.ASIN}}">
+  <input type="text" name="q" value="{{.Prefill}}" placeholder="Search Hardcover by title or author">
+  <button type="submit">Search</button>
+</form>
+<ul>
+{{range .Results}}
+  <li>
+    {{.Title}} — {{range .AuthorNames}}{{.}} {{end}}
+    <form method="post" action="/unmatched/{{$.ASIN}}/resolve" style="display:inline">
+      <input type="hidden" name="hardcover_book_id" value="{{.ID}}">
+      <button type="submit">Use this match</button>
+    </form>
+  </li>
+{{end}}
+</ul>
+</body>
+</html>

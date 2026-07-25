@@ -1,0 +1,52 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/kbuechl/audible-hardcover-sync/internal/config"
+)
+
+func TestRunServe_MountsWebUIAndShutsDownOnContextCancel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{
+		HardcoverAPIToken: "unused-in-this-test",
+		SyncInterval:      time.Hour, // long enough not to fire during the test
+		StateDBPath:       filepath.Join(dir, "state.db"),
+		CredentialsPath:   filepath.Join(dir, "credentials.json"),
+		WebUIPort:         "18080",
+		PublicURL:         "http://localhost:18080",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- runServe(ctx, cfg) }()
+
+	// Give the HTTP server a moment to start.
+	var resp *http.Response
+	var err error
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err = http.Get("http://localhost:18080/unmatched")
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("GET /unmatched error = %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if err := <-errCh; err != nil && err != context.DeadlineExceeded {
+		t.Errorf("runServe() returned unexpected error = %v", err)
+	}
+}

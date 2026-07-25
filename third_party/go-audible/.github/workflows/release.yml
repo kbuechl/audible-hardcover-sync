@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create GitHub release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            Automated release generated for tag `${{ github.ref_name }}`.
+
+            - Commit: `${{ github.sha }}`
+            - Ref: `${{ github.ref }}` (tag push)
+
+            ## Notes
+            Update this template in `.github/workflows/release.yml` with additional release details as needed.
+          draft: false
+          prerelease: false
+
+      - name: Output release URL
+        run: |
+          echo "Release created: ${{ steps.create_release.outputs.url }}"
