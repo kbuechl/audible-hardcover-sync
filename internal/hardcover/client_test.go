@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -465,5 +466,92 @@ func TestClient_do_NonGraphQLErrorStatusWithNilOut(t *testing.T) {
 	err := c.do(context.Background(), `mutation { insert_user_book(object: {}) { id } }`, nil, nil)
 	if err == nil {
 		t.Fatal("do() error = nil, want error for HTTP 401 response with no GraphQL errors array (out == nil call path, as used by UpsertUserBook's mutations)")
+	}
+}
+
+func TestClient_SearchBooks_IncludesReleaseYearAndSlug(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		return map[string]any{
+			"search": map[string]any{
+				"results": map[string]any{
+					"hits": []map[string]any{
+						{
+							"document": map[string]any{
+								"id":           "192946",
+								"title":        "A Court of Thorns and Roses",
+								"author_names": []string{"Sarah J. Maas"},
+								"isbns":        []string{"9781635575569"},
+								"release_year": 2015,
+								"slug":         "a-court-of-thorns-and-roses",
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	})
+
+	results, err := c.SearchBooks(context.Background(), "court of thorns", 5)
+	if err != nil {
+		t.Fatalf("SearchBooks() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %v, want 1", results)
+	}
+	if results[0].ReleaseYear != 2015 {
+		t.Errorf("ReleaseYear = %d, want 2015", results[0].ReleaseYear)
+	}
+	if results[0].Slug != "a-court-of-thorns-and-roses" {
+		t.Errorf("Slug = %q, want %q", results[0].Slug, "a-court-of-thorns-and-roses")
+	}
+}
+
+func TestClient_FetchCoverURLs(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if !strings.Contains(query, "books(") {
+			t.Fatalf("expected a books() query, got: %s", query)
+		}
+		return map[string]any{
+			"books": []map[string]any{
+				{"id": 111, "image": map[string]any{"url": "https://assets.hardcover.app/111.jpg"}},
+				{"id": 222, "image": nil},
+			},
+		}, nil
+	})
+
+	urls, err := c.FetchCoverURLs(context.Background(), []int64{111, 222, 333})
+	if err != nil {
+		t.Fatalf("FetchCoverURLs() error = %v", err)
+	}
+	if urls[111] != "https://assets.hardcover.app/111.jpg" {
+		t.Errorf("urls[111] = %q, want the cover URL", urls[111])
+	}
+	if _, ok := urls[222]; ok {
+		t.Errorf("urls[222] = %q, want no entry for a book with a nil image", urls[222])
+	}
+	if _, ok := urls[333]; ok {
+		t.Errorf("urls[333] should not exist (333 was never in the mocked response)")
+	}
+}
+
+func TestClient_FetchCoverURLs_EmptyInput(t *testing.T) {
+	c := New("test-token")
+	urls, err := c.FetchCoverURLs(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("FetchCoverURLs(nil) error = %v, want nil (no request should be made)", err)
+	}
+	if len(urls) != 0 {
+		t.Errorf("urls = %v, want empty", urls)
+	}
+}
+
+func TestClient_FetchCoverURLs_Error(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		return nil, fmt.Errorf("hardcover down")
+	})
+
+	_, err := c.FetchCoverURLs(context.Background(), []int64{111})
+	if err == nil {
+		t.Fatal("FetchCoverURLs() error = nil, want error propagated from do()")
 	}
 }

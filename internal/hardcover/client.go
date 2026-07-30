@@ -160,6 +160,8 @@ type SearchResult struct {
 	Title       string
 	AuthorNames []string
 	ISBNs       []string
+	ReleaseYear int
+	Slug        string
 }
 
 // SearchBooks does a fuzzy Typesense-backed search, for the manual-match
@@ -175,6 +177,8 @@ func (c *Client) SearchBooks(ctx context.Context, query string, perPage int) ([]
 						Title       string      `json:"title"`
 						AuthorNames []string    `json:"author_names"`
 						ISBNs       []string    `json:"isbns"`
+						ReleaseYear int         `json:"release_year"`
+						Slug        string      `json:"slug"`
 					} `json:"document"`
 				} `json:"hits"`
 			} `json:"results"`
@@ -201,9 +205,48 @@ func (c *Client) SearchBooks(ctx context.Context, query string, perPage int) ([]
 			Title:       hit.Document.Title,
 			AuthorNames: hit.Document.AuthorNames,
 			ISBNs:       hit.Document.ISBNs,
+			ReleaseYear: hit.Document.ReleaseYear,
+			Slug:        hit.Document.Slug,
 		})
 	}
 	return results, nil
+}
+
+// FetchCoverURLs looks up cover image URLs for a batch of Hardcover book
+// IDs. The search endpoint doesn't return an image — this is the documented
+// follow-up query (books.image.url) needed to get one. Books with no cover
+// image are simply absent from the returned map, never a zero-value entry.
+func (c *Client) FetchCoverURLs(ctx context.Context, bookIDs []int64) (map[int64]string, error) {
+	if len(bookIDs) == 0 {
+		return map[int64]string{}, nil
+	}
+
+	var out struct {
+		Books []struct {
+			ID    int64 `json:"id"`
+			Image *struct {
+				URL string `json:"url"`
+			} `json:"image"`
+		} `json:"books"`
+	}
+
+	gqlQuery := `query FetchCovers($ids: [Int!]!) {
+		books(where: {id: {_in: $ids}}) {
+			id
+			image { url }
+		}
+	}`
+	if err := c.do(ctx, gqlQuery, map[string]any{"ids": bookIDs}, &out); err != nil {
+		return nil, fmt.Errorf("fetch cover urls: %w", err)
+	}
+
+	urls := make(map[int64]string, len(out.Books))
+	for _, b := range out.Books {
+		if b.Image != nil && b.Image.URL != "" {
+			urls[b.ID] = b.Image.URL
+		}
+	}
+	return urls, nil
 }
 
 // UpsertUserBook sets the reading status (and, if non-nil, rating) for a
