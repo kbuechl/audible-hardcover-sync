@@ -32,14 +32,14 @@ func TestRunServe_MountsWebUIAndShutsDownOnContextCancel(t *testing.T) {
 	var err error
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err = http.Get("http://localhost:18080/unmatched")
+		resp, err = http.Get("http://localhost:18080/api/unmatched")
 		if err == nil {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if err != nil {
-		t.Fatalf("GET /unmatched error = %v", err)
+		t.Fatalf("GET /api/unmatched error = %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
