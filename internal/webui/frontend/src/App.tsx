@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { UnmatchedBook } from './types'
-import { fetchUnmatched } from './api'
+import { fetchUnmatched, fetchUnmatchedDetail } from './api'
 import Shelf from './components/Shelf'
+import ResolvePanel from './components/ResolvePanel'
 
 export default function App() {
   const [books, setBooks] = useState<UnmatchedBook[]>([])
   const [selectedAsin, setSelectedAsin] = useState<string | null>(null)
+  const [selectedBook, setSelectedBook] = useState<UnmatchedBook | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -13,6 +15,14 @@ export default function App() {
       .then(setBooks)
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (selectedAsin === null) {
+      setSelectedBook(null)
+      return
+    }
+    fetchUnmatchedDetail(selectedAsin).then(setSelectedBook)
+  }, [selectedAsin])
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -31,9 +41,10 @@ export default function App() {
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-6 items-start">
         <Shelf books={books} selectedAsin={selectedAsin} onSelect={setSelectedAsin} />
         {loading && <p className="text-muted text-sm">Loading…</p>}
-        {!loading && selectedAsin === null && (
+        {!loading && selectedBook === null && (
           <p className="text-muted text-sm p-4">Select a book to resolve it.</p>
         )}
+        {selectedBook !== null && <ResolvePanel book={selectedBook} onConfirm={() => {}} />}
       </div>
     </div>
   )
