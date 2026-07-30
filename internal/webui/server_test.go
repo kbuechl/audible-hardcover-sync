@@ -259,6 +259,28 @@ func TestHandler_SPAFallbackForClientSideRoutes(t *testing.T) {
 	}
 }
 
+func TestHandler_ServesRealStaticAssets(t *testing.T) {
+	store := newTestStore(t)
+	srv := New(store, &fakeSearcher{})
+
+	// A request for a real static asset should serve the asset directly,
+	// not the SPA fallback. This covers the branch in spaHandler that
+	// calls fileServer.ServeHTTP for existing files.
+	req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	// Verify we're NOT getting the index.html fallback by ensuring
+	// the response doesn't contain the HTML doctype that would indicate
+	// we fell back to the SPA's root index.html.
+	if bytes.Contains(rec.Body.Bytes(), []byte("<!doctype html")) || bytes.Contains(rec.Body.Bytes(), []byte("<!DOCTYPE html")) {
+		t.Errorf("body contains HTML doctype; should be serving favicon.svg, not index.html fallback")
+	}
+}
+
 func TestAPIResolve(t *testing.T) {
 	tests := []struct {
 		name     string
