@@ -1,0 +1,44 @@
+@import "tailwindcss";
+@import "@fontsource/fraunces/600.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@theme {
+  --font-serif: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  --color-paper: #f1f0e9;
+  --color-panel: #ffffff;
+  --color-line: #ddd8cb;
+  --color-ink: #1f2421;
+  --color-muted: #746f62;
+  --color-pine: #2f5d50;
+  --color-pine-soft: #e4ede9;
+  --color-pine-text: #1f4038;
+  --color-burgundy: #8c3d34;
+  --color-burgundy-soft: #f3e4e1;
+  --color-gold: #b08d3e;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-paper: #16191a;
+    --color-panel: #1d2220;
+    --color-line: #33362f;
+    --color-ink: #ede9df;
+    --color-muted: #9c9788;
+    --color-pine: #6fa593;
+    --color-pine-soft: #223530;
+    --color-pine-text: #a9d6c8;
+    --color-burgundy: #d99184;
+    --color-burgundy-soft: #35211d;
+    --color-gold: #d6b36b;
+  }
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
