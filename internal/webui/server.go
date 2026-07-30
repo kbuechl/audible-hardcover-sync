@@ -5,8 +5,9 @@
 // hardcover.Client.SearchBooks, and it is human-supervised: a person
 // reviews the search results and picks the match, rather than the sync
 // path applying a fuzzy match automatically. The actual UI is a React SPA
-// (see frontend/) that consumes this API; static-file serving of the
-// built SPA is added in a later task once frontend/dist exists to embed.
+// (see frontend/) that consumes this API; the built SPA (frontend/dist) is
+// embedded and served for any request that doesn't match /api/*, with a
+// client-side-routing fallback to index.html (see static.go).
 package webui
 
 import (
@@ -40,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/unmatched/{asin}", s.handleAPIUnmatchedDetail)
 	mux.HandleFunc("GET /api/search", s.handleAPISearch)
 	mux.HandleFunc("POST /api/resolve", s.handleAPIResolve)
+	mux.Handle("/", spaHandler())
 	return mux
 }
 

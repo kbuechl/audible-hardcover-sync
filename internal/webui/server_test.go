@@ -227,6 +227,38 @@ func TestAPISearch(t *testing.T) {
 	}
 }
 
+func TestHandler_ServesStaticFrontend(t *testing.T) {
+	store := newTestStore(t)
+	srv := New(store, &fakeSearcher{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("<!doctype html")) && !bytes.Contains(rec.Body.Bytes(), []byte("<!DOCTYPE html")) {
+		t.Errorf("body doesn't look like the built SPA's index.html: %s", rec.Body.String())
+	}
+}
+
+func TestHandler_SPAFallbackForClientSideRoutes(t *testing.T) {
+	store := newTestStore(t)
+	srv := New(store, &fakeSearcher{})
+
+	// A path with no matching static asset and no /api prefix should still
+	// serve index.html, so client-side routing (if any is added later) works
+	// on a hard refresh instead of 404ing.
+	req := httptest.NewRequest(http.MethodGet, "/some/deep/client/route", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SPA fallback)", rec.Code)
+	}
+}
+
 func TestAPIResolve(t *testing.T) {
 	tests := []struct {
 		name     string
