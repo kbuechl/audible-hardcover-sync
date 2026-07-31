@@ -26,7 +26,7 @@ for the full design.
    docker compose up -d
    ```
 5. Unmatched books (no ISBN, or no Hardcover match found) appear at
-   `${PUBLIC_URL}/unmatched` — search and confirm the right Hardcover
+   `${PUBLIC_URL}/` — search and confirm the right Hardcover
    edition there.
 
 ## Security note
