@@ -2,3 +2,5 @@
 .git
 docs/
 *.md
+internal/webui/frontend/node_modules
+internal/webui/frontend/dist
