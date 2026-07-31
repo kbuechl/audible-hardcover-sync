@@ -5,13 +5,14 @@ interface ResultCardProps {
   result: SearchResultItem
   book: UnmatchedBook
   onConfirm: (hardcoverBookId: number) => void
+  confirming?: boolean
 }
 
 function isExactMatch(result: SearchResultItem, book: UnmatchedBook): boolean {
   return result.title.trim().toLowerCase() === book.title.trim().toLowerCase()
 }
 
-export default function ResultCard({ result, book, onConfirm }: ResultCardProps) {
+export default function ResultCard({ result, book, onConfirm, confirming = false }: ResultCardProps) {
   const match = isExactMatch(result, book)
   return (
     <div className="flex items-center justify-between gap-3 border border-line rounded-lg p-3 bg-paper">
@@ -37,7 +38,8 @@ export default function ResultCard({ result, book, onConfirm }: ResultCardProps)
         <button
           type="button"
           onClick={() => onConfirm(result.id)}
-          className={`text-xs font-semibold rounded px-3 py-1.5 text-white whitespace-nowrap ${
+          disabled={confirming}
+          className={`text-xs font-semibold rounded px-3 py-1.5 text-white whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
             match ? 'bg-gold' : 'bg-pine'
           }`}
         >

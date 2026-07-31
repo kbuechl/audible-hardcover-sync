@@ -9,6 +9,8 @@ export default function App() {
   const [selectedAsin, setSelectedAsin] = useState<string | null>(null)
   const [selectedBook, setSelectedBook] = useState<UnmatchedBook | null>(null)
   const [loading, setLoading] = useState(true)
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const reloadShelf = () => fetchUnmatched().then(setBooks)
 
@@ -26,9 +28,18 @@ export default function App() {
 
   const handleConfirm = async (hardcoverBookId: number) => {
     if (selectedAsin === null) return
-    await resolveMatch(selectedAsin, hardcoverBookId)
-    setSelectedAsin(null)
-    await reloadShelf()
+    setConfirming(true)
+    setError(null)
+    try {
+      await resolveMatch(selectedAsin, hardcoverBookId)
+      setSelectedAsin(null)
+      await reloadShelf()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(`Couldn't confirm this match — ${message}. Try again.`)
+    } finally {
+      setConfirming(false)
+    }
   }
 
   return (
@@ -45,13 +56,21 @@ export default function App() {
         </p>
       </header>
 
+      {error !== null && (
+        <p className="font-mono text-xs bg-burgundy-soft text-burgundy rounded-lg px-4 py-3 mb-6">
+          {error}
+        </p>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-6 items-start">
         <Shelf books={books} selectedAsin={selectedAsin} onSelect={setSelectedAsin} />
         {loading && <p className="text-muted text-sm">Loading…</p>}
         {!loading && selectedBook === null && (
           <p className="text-muted text-sm p-4">Select a book to resolve it.</p>
         )}
-        {selectedBook !== null && <ResolvePanel book={selectedBook} onConfirm={handleConfirm} />}
+        {selectedBook !== null && (
+          <ResolvePanel book={selectedBook} onConfirm={handleConfirm} confirming={confirming} />
+        )}
       </div>
     </div>
   )

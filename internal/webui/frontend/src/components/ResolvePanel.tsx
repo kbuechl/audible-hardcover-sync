@@ -6,9 +6,10 @@ import ResultCard from './ResultCard'
 interface ResolvePanelProps {
   book: UnmatchedBook
   onConfirm: (hardcoverBookId: number) => void
+  confirming?: boolean
 }
 
-export default function ResolvePanel({ book, onConfirm }: ResolvePanelProps) {
+export default function ResolvePanel({ book, onConfirm, confirming = false }: ResolvePanelProps) {
   const { query, setQuery, results, loading } = useDebouncedSearch(book.asin, book.title)
 
   return (
@@ -40,7 +41,7 @@ export default function ResolvePanel({ book, onConfirm }: ResolvePanelProps) {
       )}
       <div className="flex flex-col gap-2">
         {results.map((r) => (
-          <ResultCard key={r.id} result={r} book={book} onConfirm={onConfirm} />
+          <ResultCard key={r.id} result={r} book={book} onConfirm={onConfirm} confirming={confirming} />
         ))}
       </div>
     </div>
