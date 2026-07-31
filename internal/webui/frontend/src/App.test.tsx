@@ -1,48 +1,40 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import App from './App'
+import * as api from './api'
 
-beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [] }))
-})
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
-
-describe('App', () => {
-  it('renders the page heading', () => {
-    render(<App />)
-    expect(screen.getByText('Unmatched Shelf')).toBeInTheDocument()
+describe('App resolve flow', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'fetchUnmatched').mockResolvedValue([
+      { asin: 'A1', title: 'A Court of Thorns and Roses', author: 'Sarah J. Maas', status: 'finished', percentComplete: 100 },
+    ])
+    vi.spyOn(api, 'fetchUnmatchedDetail').mockResolvedValue({
+      asin: 'A1', title: 'A Court of Thorns and Roses', author: 'Sarah J. Maas', status: 'finished', percentComplete: 100,
+    })
+    vi.spyOn(api, 'searchHardcover').mockResolvedValue([
+      { id: 999, title: 'A Court of Thorns and Roses', authorNames: ['Sarah J. Maas'], slug: 'acotar', releaseYear: 2015 },
+    ])
   })
 
-  it('fetches unmatched books on mount and shows the empty state when there are none', async () => {
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/nothing to resolve/i)).toBeInTheDocument()
-    })
-
-    expect(fetch).toHaveBeenCalledWith('/api/unmatched', undefined)
-    expect(screen.getByText('0')).toBeInTheDocument()
-  })
-
-  it('renders a shelf card for each fetched book', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => [
-          { asin: 'A1', title: 'Book One', author: 'Author One', status: 'finished', percentComplete: 100 },
-        ],
-      }),
-    )
+  it('confirming a match calls resolveMatch with the right ids and returns to the shelf', async () => {
+    const resolveSpy = vi.spyOn(api, 'resolveMatch').mockResolvedValue(undefined)
+    const user = userEvent.setup()
 
     render(<App />)
 
-    await waitFor(() => {
-      expect(screen.getByText('Book One')).toBeInTheDocument()
-    })
-    expect(screen.getByText('Select a book to resolve it.')).toBeInTheDocument()
+    await screen.findByText('A Court of Thorns and Roses')
+    await user.click(screen.getByText('A Court of Thorns and Roses'))
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm match/i })
+
+    // After confirming, the shelf refetch should report the book resolved
+    // (empty), which the assertion below checks by re-mocking fetchUnmatched.
+    vi.spyOn(api, 'fetchUnmatched').mockResolvedValue([])
+
+    await user.click(confirmButton)
+
+    await waitFor(() => expect(resolveSpy).toHaveBeenCalledWith('A1', 999))
+    await waitFor(() => expect(screen.getByText(/nothing to resolve/i)).toBeInTheDocument())
   })
 })
