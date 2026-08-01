@@ -14,11 +14,12 @@ services:
     volumes:
       - sync-data:/data
     ports:
-      # Bind to the LAN interface only — this UI has no authentication.
-      # Replace 192.168.1.10 with your host's actual LAN IP, or remove the
-      # host-side address entirely only if this host is not reachable from
-      # the internet.
-      - "192.168.1.10:8080:8080"
+      # Bind to localhost only for now — this UI has no authentication.
+      # When ready to reach this from other devices on your LAN, replace
+      # 127.0.0.1 with your host's actual LAN IP (never 0.0.0.0 / all
+      # interfaces unless this host is genuinely unreachable from the
+      # internet).
+      - "127.0.0.1:8080:8080"
 
 volumes:
   sync-data:
