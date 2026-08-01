@@ -21,6 +21,7 @@ type AudibleClient interface {
 // run a sync pass, narrowed so this package can be tested against a fake.
 type HardcoverClient interface {
 	FindBookByISBN(ctx context.Context, isbn string) (int64, bool, error)
+	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
 	UpsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error
 }
 
@@ -37,6 +38,15 @@ type Deps struct {
 	Hardcover HardcoverClient
 	Store     *state.Store
 	Notifier  Notifier
+	// MatchConfidence is the minimum matcher.BestMatch score (0.0-1.0)
+	// required to auto-accept a fuzzy title/author match when ISBN
+	// resolution fails, and to write it to the user's Hardcover library
+	// unattended. Lower values (e.g. the "loose" preset, 0.55) trade
+	// recall for a real, if modest, false-positive risk on unrelated
+	// short/common-word titles — see internal/matcher's confidence
+	// scoring docs. This is a deliberate per-user choice; the default
+	// ("strict", 0.95) is nowhere near that risk zone.
+	MatchConfidence float64
 }
 
 // Result summarizes the outcome of a sync pass.
@@ -165,16 +175,48 @@ func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior 
 	}
 
 	isbn, ok := matcher.BestISBN(matcher.AudibleItem{ASIN: item.ASIN, ISBN13: item.ISBN13, ISBN10: item.ISBN10})
-	if !ok {
-		return 0, nil
+	if ok {
+		id, found, err := d.Hardcover.FindBookByISBN(ctx, isbn)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			return id, nil
+		}
 	}
 
-	id, found, err := d.Hardcover.FindBookByISBN(ctx, isbn)
+	// No ISBN, or the ISBN wasn't found in Hardcover's catalog (common for
+	// audiobooks, which are frequently catalogued by ASIN with no linked
+	// print/ebook ISBN) — try a confidence-scored fuzzy fallback before
+	// giving up to the manual-match path.
+	return resolveByFuzzyMatch(ctx, d, item)
+}
+
+// resolveByFuzzyMatch searches Hardcover by title and, if the best-scoring
+// candidate clears d.MatchConfidence, returns its book ID. Returns 0 (with
+// no error) whenever there's no confident match, routing the item to the
+// unmatched/manual-match flow exactly like a failed ISBN lookup.
+func resolveByFuzzyMatch(ctx context.Context, d Deps, item audible.LibraryItem) (int64, error) {
+	results, err := d.Hardcover.SearchBooks(ctx, item.Title, 10)
 	if err != nil {
 		return 0, err
 	}
-	if !found {
+	if len(results) == 0 {
 		return 0, nil
 	}
-	return id, nil
+
+	candidates := make([]matcher.CandidateInfo, len(results))
+	for i, r := range results {
+		author := ""
+		if len(r.AuthorNames) > 0 {
+			author = r.AuthorNames[0]
+		}
+		candidates[i] = matcher.CandidateInfo{Title: r.Title, Author: author}
+	}
+
+	idx, score, ok := matcher.BestMatch(item.Title, item.Author, candidates)
+	if !ok || score < d.MatchConfidence {
+		return 0, nil
+	}
+	return results[idx].ID, nil
 }

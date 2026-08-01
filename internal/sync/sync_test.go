@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
+	"github.com/kbuechl/audible-hardcover-sync/internal/hardcover"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
 )
 
@@ -28,21 +29,31 @@ type upsertCall struct {
 }
 
 type fakeHardcover struct {
-	byISBN    map[string]int64
-	upserted  map[int64]upsertCall
-	upsertErr error
+	byISBN        map[string]int64
+	searchResults map[string][]hardcover.SearchResult
+	searchErr     error
+	upserted      map[int64]upsertCall
+	upsertErr     error
 }
 
 func newFakeHardcover() *fakeHardcover {
 	return &fakeHardcover{
-		byISBN:   map[string]int64{},
-		upserted: map[int64]upsertCall{},
+		byISBN:        map[string]int64{},
+		searchResults: map[string][]hardcover.SearchResult{},
+		upserted:      map[int64]upsertCall{},
 	}
 }
 
 func (f *fakeHardcover) FindBookByISBN(ctx context.Context, isbn string) (int64, bool, error) {
 	id, ok := f.byISBN[isbn]
 	return id, ok, nil
+}
+
+func (f *fakeHardcover) SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error) {
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	return f.searchResults[query], nil
 }
 
 func (f *fakeHardcover) UpsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
@@ -84,12 +95,14 @@ func int64Ptr(v int64) *int64 { return &v }
 // Deps/running Run/checking the top-level error in every scenario.
 func TestRun(t *testing.T) {
 	tests := []struct {
-		name      string
-		items     []audible.LibraryItem
-		byISBN    map[string]int64
-		upsertErr error
-		seed      *state.BookState
-		check     func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result)
+		name            string
+		items           []audible.LibraryItem
+		byISBN          map[string]int64
+		searchResults   map[string][]hardcover.SearchResult
+		matchConfidence float64
+		upsertErr       error
+		seed            *state.BookState
+		check           func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result)
 	}{
 		{
 			name: "finished book syncs as read",
@@ -264,6 +277,47 @@ func TestRun(t *testing.T) {
 			},
 		},
 		{
+			name: "no isbn but high-confidence fuzzy match auto-syncs",
+			items: []audible.LibraryItem{
+				{ASIN: "A10", Title: "System Collapse (Dramatized Adaptation)", Author: "Martha Wells", IsFinished: true, PercentComplete: 100},
+			},
+			// no ISBN13/ISBN10 set — forces the fuzzy fallback path
+			searchResults: map[string][]hardcover.SearchResult{
+				"System Collapse (Dramatized Adaptation)": {{ID: 888, Title: "System Collapse", AuthorNames: []string{"Martha Wells"}}},
+			},
+			matchConfidence: 0.75, // medium
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Errorf("Synced = %d, want 1", result.Synced)
+				}
+				got, ok := fh.upserted[888]
+				if !ok {
+					t.Fatalf("upserted = %v, want an entry for book id 888", fh.upserted)
+				}
+				if got.statusID != 3 {
+					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+				}
+			},
+		},
+		{
+			name: "no isbn and low-confidence fuzzy match falls through to unmatched",
+			items: []audible.LibraryItem{
+				{ASIN: "A11", Title: "Dune", Author: "Frank Herbert", IsFinished: true, PercentComplete: 100},
+			},
+			searchResults: map[string][]hardcover.SearchResult{
+				"Dune": {{ID: 999, Title: "The Great Gatsby", AuthorNames: []string{"F. Scott Fitzgerald"}}},
+			},
+			matchConfidence: 0.95, // strict — this unrelated candidate must not clear it
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Unmatched != 1 {
+					t.Errorf("Unmatched = %d, want 1", result.Unmatched)
+				}
+				if len(fh.upserted) != 0 {
+					t.Errorf("expected no Hardcover upsert for a low-confidence match, got %v", fh.upserted)
+				}
+			},
+		},
+		{
 			name: "hardcover error counts as errored, not fatal",
 			items: []audible.LibraryItem{
 				{ASIN: "A7", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
@@ -285,6 +339,9 @@ func TestRun(t *testing.T) {
 			for isbn, id := range tt.byISBN {
 				fh.byISBN[isbn] = id
 			}
+			for query, results := range tt.searchResults {
+				fh.searchResults[query] = results
+			}
 			fh.upsertErr = tt.upsertErr
 			store := newTestStore(t)
 			if tt.seed != nil {
@@ -294,7 +351,7 @@ func TestRun(t *testing.T) {
 			}
 			fn := &fakeNotifier{}
 
-			result, err := Run(context.Background(), Deps{Audible: fa, Hardcover: fh, Store: store, Notifier: fn})
+			result, err := Run(context.Background(), Deps{Audible: fa, Hardcover: fh, Store: store, Notifier: fn, MatchConfidence: tt.matchConfidence})
 			if err != nil {
 				t.Fatalf("Run() error = %v, want nil (per-book errors must not fail the run)", err)
 			}

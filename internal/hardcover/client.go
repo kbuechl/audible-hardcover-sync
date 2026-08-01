@@ -164,9 +164,10 @@ type SearchResult struct {
 	Slug        string
 }
 
-// SearchBooks does a fuzzy Typesense-backed search, for the manual-match
-// web UI only. The automated sync path never calls this — it uses the
-// deterministic FindBookByISBN instead.
+// SearchBooks does a fuzzy Typesense-backed search. It backs both the
+// manual-match web UI and, as a confidence-scored fallback, the automated
+// sync path (internal/sync.resolveByFuzzyMatch) when the deterministic
+// FindBookByISBN produces no match.
 func (c *Client) SearchBooks(ctx context.Context, query string, perPage int) ([]SearchResult, error) {
 	var out struct {
 		Search struct {

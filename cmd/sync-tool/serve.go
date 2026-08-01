@@ -40,10 +40,11 @@ func runOnce(ctx context.Context, cfg config.Config) (syncpkg.Result, error) {
 	notifier := notify.New(cfg.NotifyURLs, cfg.PublicURL)
 
 	result, err := syncpkg.Run(ctx, syncpkg.Deps{
-		Audible:   audibleClient,
-		Hardcover: hc,
-		Store:     store,
-		Notifier:  notifier,
+		Audible:         audibleClient,
+		Hardcover:       hc,
+		Store:           store,
+		Notifier:        notifier,
+		MatchConfidence: cfg.MatchConfidence,
 	})
 	if err != nil {
 		return result, err
