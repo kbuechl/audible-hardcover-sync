@@ -22,6 +22,7 @@ func TestLoad(t *testing.T) {
 				WebUIPort:         "8080",
 				PublicURL:         "",
 				NotifyURLs:        nil,
+				MatchConfidence:   0.95,
 			},
 		},
 		{
@@ -34,6 +35,7 @@ func TestLoad(t *testing.T) {
 				"WEB_UI_PORT":         "9090",
 				"PUBLIC_URL":          "http://homeserver.local:9090",
 				"NOTIFY_URLS":         "discord://token@id,mailto://user:pass@smtp.example.com",
+				"MATCH_CONFIDENCE":    "0.82",
 			},
 			want: Config{
 				HardcoverAPIToken: "test-token",
@@ -43,12 +45,111 @@ func TestLoad(t *testing.T) {
 				WebUIPort:         "9090",
 				PublicURL:         "http://homeserver.local:9090",
 				NotifyURLs:        []string{"discord://token@id", "mailto://user:pass@smtp.example.com"},
+				MatchConfidence:   0.82,
+			},
+		},
+		{
+			name: "match confidence defaults to strict (0.95) when unset",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.95,
+			},
+		},
+		{
+			name: "match confidence: named preset strict",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "strict"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.95,
+			},
+		},
+		{
+			name: "match confidence: named preset medium",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "medium"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.75,
+			},
+		},
+		{
+			name: "match confidence: named preset loose",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "loose"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.55,
+			},
+		},
+		{
+			name: "match confidence: raw fraction",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "0.82"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.82,
+			},
+		},
+		{
+			name: "match confidence: bare percentage number",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "82"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.82,
+			},
+		},
+		{
+			name: "match confidence: explicit percent sign",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "82%"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.82,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"HARDCOVER_API_TOKEN", "SYNC_INTERVAL", "STATE_DB_PATH", "CREDENTIALS_PATH", "WEB_UI_PORT", "PUBLIC_URL", "NOTIFY_URLS"} {
+			for _, k := range []string{"HARDCOVER_API_TOKEN", "SYNC_INTERVAL", "STATE_DB_PATH", "CREDENTIALS_PATH", "WEB_UI_PORT", "PUBLIC_URL", "NOTIFY_URLS", "MATCH_CONFIDENCE"} {
 				t.Setenv(k, tt.env[k]) // empty string for unset keys, which clears any inherited value
 			}
 			got, err := Load()
@@ -81,6 +182,9 @@ func TestLoad(t *testing.T) {
 					t.Errorf("NotifyURLs[%d] = %q, want %q", i, got.NotifyURLs[i], tt.want.NotifyURLs[i])
 				}
 			}
+			if got.MatchConfidence != tt.want.MatchConfidence {
+				t.Errorf("MatchConfidence = %v, want %v", got.MatchConfidence, tt.want.MatchConfidence)
+			}
 		})
 	}
 }
@@ -99,5 +203,23 @@ func TestLoad_InvalidSyncInterval(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want error for invalid SYNC_INTERVAL")
+	}
+}
+
+func TestLoad_InvalidMatchConfidence(t *testing.T) {
+	t.Setenv("HARDCOVER_API_TOKEN", "test-token")
+	t.Setenv("MATCH_CONFIDENCE", "not-a-number")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for invalid MATCH_CONFIDENCE")
+	}
+}
+
+func TestLoad_MatchConfidenceOutOfRange(t *testing.T) {
+	t.Setenv("HARDCOVER_API_TOKEN", "test-token")
+	t.Setenv("MATCH_CONFIDENCE", "150") // 150% -> 1.5, out of [0,1] after normalization
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for MATCH_CONFIDENCE out of range")
 	}
 }
