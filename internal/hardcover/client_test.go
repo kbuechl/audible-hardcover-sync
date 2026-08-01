@@ -669,3 +669,67 @@ func TestClient_RetriesExhausted(t *testing.T) {
 		t.Errorf("server attempts = %d, want 5 (1 initial + 4 retries)", got)
 	}
 }
+
+// TestClient_DoesNotRetryMutationsOn429 verifies that GraphQL mutations
+// (marked via the X-GraphQL-Operation: mutation header set in do()) are
+// NOT retried on 429. A 429 response does not guarantee the server
+// failed to process the mutation — a rate-limiter proxy may return 429
+// after the upstream already committed the INSERT. Retrying a
+// non-idempotent mutation like insert_user_book in that case creates
+// duplicate read entries on the user's Hardcover library.
+func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
+	var mutationAttempts atomic.Int32
+	var meDone, findDone bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		switch {
+		case strings.Contains(reqBody.Query, "me") && !meDone:
+			meDone = true
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+				"me": []map[string]any{{"id": 42, "username": "test"}},
+			}})
+		case strings.Contains(reqBody.Query, "user_books(") && !findDone:
+			findDone = true
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+				"user_books": []map[string]any{}, // no existing row → INSERT path
+			}})
+		default:
+			// This is the mutation (insert_user_book) — 429 it.
+			// Verify the mutation header is set so retryPolicy can identify it.
+			if r.Header.Get("X-GraphQL-Operation") != "mutation" {
+				t.Errorf("X-GraphQL-Operation = %q, want %q for mutation", r.Header.Get("X-GraphQL-Operation"), "mutation")
+			}
+			mutationAttempts.Add(1)
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{"error": "Throttled"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	rc := retryablehttp.NewClient()
+	rc.RetryMax = 4
+	rc.RetryWaitMin = 1 * time.Millisecond
+	rc.RetryWaitMax = 10 * time.Millisecond
+	rc.CheckRetry = retryPolicy
+	rc.Backoff = retryablehttp.DefaultBackoff
+	rc.HTTPClient = srv.Client()
+	rc.Logger = nil
+
+	c := New("test-token")
+	c.endpoint = srv.URL
+	c.httpClient = rc.StandardClient()
+
+	err := c.UpsertUserBook(context.Background(), 777, StatusRead, nil)
+	if err == nil {
+		t.Fatal("UpsertUserBook() error = nil, want error for 429 on mutation")
+	}
+	if got := mutationAttempts.Load(); got != 1 {
+		t.Errorf("mutation attempts = %d, want 1 (mutations must not be retried on 429)", got)
+	}
+}

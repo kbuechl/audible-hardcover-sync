@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -54,12 +55,29 @@ func New(token string) *Client {
 // which is a permanent "not implemented" and not worth retrying). It
 // deliberately does NOT retry 4xx client errors like 401 (bad token) or
 // 404 (not found) — those are permanent and retrying just wastes time.
+//
+// Mutations (marked via the X-GraphQL-Operation: mutation header set in
+// do()) are NOT retried on 429 or 5xx. A 429 or 5xx response does NOT
+// guarantee the server failed to process the request — a rate-limiter
+// proxy may return 429 after the upstream already committed the mutation.
+// Retrying a non-idempotent INSERT like insert_user_book in that case
+// creates duplicate read entries on the user's Hardcover library. Network
+// errors (err != nil, resp == nil) ARE still retried for mutations,
+// since a transport-level failure means the request almost certainly
+// never reached the server.
 func retryPolicy(ctx context.Context, resp *http.Response, err error) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
 	if err != nil {
-		return true, nil // network/transport errors are retryable
+		return true, nil // network/transport errors are retryable (request likely never reached server)
+	}
+	isMutation := resp.Request != nil && resp.Request.Header.Get("X-GraphQL-Operation") == "mutation"
+	if isMutation {
+		// Mutations are not idempotent — don't retry on HTTP status
+		// codes, because the server may have already processed the
+		// mutation before returning 429/5xx.
+		return false, nil
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return true, nil
@@ -97,6 +115,14 @@ func (c *Client) do(ctx context.Context, query string, variables map[string]any,
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", c.token)
 	req.Header.Set("user-agent", "audible-hardcover-sync (github.com/kbuechl/audible-hardcover-sync)")
+	// Mark mutations so retryPolicy can avoid retrying non-idempotent
+	// operations on 429/5xx (the server may have already committed the
+	// mutation before returning an error status).
+	if strings.HasPrefix(strings.TrimSpace(query), "mutation") {
+		req.Header.Set("X-GraphQL-Operation", "mutation")
+	} else {
+		req.Header.Set("X-GraphQL-Operation", "query")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
