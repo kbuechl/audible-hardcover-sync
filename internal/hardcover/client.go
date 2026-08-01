@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 const (
@@ -32,11 +35,39 @@ type Client struct {
 }
 
 func New(token string) *Client {
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = 4
+	retryClient.RetryWaitMin = 1 * time.Second
+	retryClient.RetryWaitMax = 30 * time.Second
+	retryClient.CheckRetry = retryPolicy
+	retryClient.Backoff = retryablehttp.DefaultBackoff // exponential, respects Retry-After on 429
+
 	return &Client{
 		token:      token,
 		endpoint:   defaultEndpoint,
-		httpClient: http.DefaultClient,
+		httpClient: retryClient.StandardClient(),
 	}
+}
+
+// retryPolicy retries on network errors, HTTP 429 (Throttled — the
+// Hardcover API's rate-limit signal), and 5xx server errors (except 501,
+// which is a permanent "not implemented" and not worth retrying). It
+// deliberately does NOT retry 4xx client errors like 401 (bad token) or
+// 404 (not found) — those are permanent and retrying just wastes time.
+func retryPolicy(ctx context.Context, resp *http.Response, err error) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if err != nil {
+		return true, nil // network/transport errors are retryable
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return true, nil
+	}
+	if resp.StatusCode >= 500 && resp.StatusCode != http.StatusNotImplemented {
+		return true, nil
+	}
+	return false, nil
 }
 
 type gqlRequest struct {

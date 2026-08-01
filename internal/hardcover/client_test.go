@@ -8,7 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 func newTestServer(t *testing.T, handler func(query string, vars map[string]any) (any, error)) (*httptest.Server, *Client) {
@@ -563,5 +567,105 @@ func TestClient_FetchCoverURLs_Error(t *testing.T) {
 	_, err := c.FetchCoverURLs(context.Background(), []int64{111})
 	if err == nil {
 		t.Fatal("FetchCoverURLs() error = nil, want error propagated from do()")
+	}
+}
+
+// newRetryTestServer creates a test server and a Client whose httpClient
+// is a retryablehttp transport wrapping the server's client, with fast
+// backoff settings suitable for tests. The returned client has retries
+// enabled (unlike newTestServer, which uses a plain client with no
+// retries).
+func newRetryTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *Client) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	rc := retryablehttp.NewClient()
+	rc.RetryMax = 4
+	rc.RetryWaitMin = 1 * time.Millisecond
+	rc.RetryWaitMax = 10 * time.Millisecond
+	rc.CheckRetry = retryPolicy
+	rc.Backoff = retryablehttp.DefaultBackoff
+	rc.HTTPClient = srv.Client()
+	rc.Logger = nil // suppress chatty retry logs in tests
+
+	c := New("test-token")
+	c.endpoint = srv.URL
+	c.httpClient = rc.StandardClient()
+	return srv, c
+}
+
+// TestClient_RetriesOn429 verifies that a 429 Throttled response is
+// retried and eventually succeeds when the server recovers. This is the
+// real production scenario: Hardcover rate-limits, the client backs off
+// (respecting Retry-After if present), and retries until the request
+// goes through.
+func TestClient_RetriesOn429(t *testing.T) {
+	var attempts atomic.Int32
+	_, c := newRetryTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n <= 2 {
+			w.Header().Set("Retry-After", "0") // don't actually wait in tests
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{"error": "Throttled"})
+			return
+		}
+		// Third attempt succeeds
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"me": []map[string]any{{"id": 42, "username": "reader"}},
+		}})
+	}))
+
+	id, _, err := c.Me(context.Background())
+	if err != nil {
+		t.Fatalf("Me() error = %v, want nil after retries recover from 429", err)
+	}
+	if id != 42 {
+		t.Errorf("Me() id = %d, want 42", id)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Errorf("server attempts = %d, want 3 (2 retries + 1 success)", got)
+	}
+}
+
+// TestClient_DoesNotRetryOn401 verifies that a 401 Unauthorized is NOT
+// retried — a bad token is a permanent client error, and retrying it
+// just wastes time and spams the API.
+func TestClient_DoesNotRetryOn401(t *testing.T) {
+	var attempts atomic.Int32
+	_, c := newRetryTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"error": "Unable to verify token"})
+	}))
+
+	_, _, err := c.Me(context.Background())
+	if err == nil {
+		t.Fatal("Me() error = nil, want error for 401")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("server attempts = %d, want 1 (401 must not be retried)", got)
+	}
+}
+
+// TestClient_RetriesExhausted verifies that when 429 persists beyond
+// RetryMax, the final 429 response is returned as an error to the
+// caller (not swallowed or silently retried forever).
+func TestClient_RetriesExhausted(t *testing.T) {
+	var attempts atomic.Int32
+	_, c := newRetryTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]any{"error": "Throttled"})
+	}))
+
+	_, _, err := c.Me(context.Background())
+	if err == nil {
+		t.Fatal("Me() error = nil, want error after retries exhausted on persistent 429")
+	}
+	// RetryMax=4 means 1 initial + 4 retries = 5 total attempts
+	if got := attempts.Load(); got != 5 {
+		t.Errorf("server attempts = %d, want 5 (1 initial + 4 retries)", got)
 	}
 }

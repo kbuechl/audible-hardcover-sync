@@ -1,9 +1,9 @@
 # Third-Party Licenses
 
 This project vendors and depends on the following third-party software.
-All licenses are permissive (MIT, BSD-3-Clause, or OFL-1.1) — no
-copyleft dependencies are used. Full license text for each is available
-at the linked source.
+All licenses are permissive or weak-copyleft (MIT, BSD-3-Clause,
+MPL-2.0, or OFL-1.1). Full license text for each is available at the
+linked source.
 
 ## Vendored source
 
@@ -25,6 +25,8 @@ at the linked source.
 | github.com/mattn/go-colorable | MIT |
 | github.com/mattn/go-isatty | MIT |
 | github.com/ncruces/go-strftime | MIT |
+| github.com/hashicorp/go-retryablehttp | MPL-2.0 |
+| github.com/hashicorp/go-cleanhttp | MPL-2.0 |
 | github.com/google/uuid | BSD-3-Clause |
 | github.com/remyoudompheng/bigfft | BSD-3-Clause |
 | golang.org/x/crypto | BSD-3-Clause |
@@ -55,6 +57,14 @@ Build-time-only frontend tooling (`@testing-library/*`, `@types/*`,
 MIT and BSD-3-Clause licenses require this notice: the above software is
 provided "as is", without warranty of any kind. Each package's full
 license text and copyright holder can be found at its linked repository.
+
+## MPL-2.0 notice
+
+The HashiCorp packages (go-retryablehttp, go-cleanhttp) are licensed
+under the Mozilla Public License 2.0, a weak file-level copyleft
+license. Using them as an imported Go module does not propagate MPL
+obligations to this project's own source files. Each package's full
+license text is available at its linked repository.
 
 ## OFL-1.1 notice
 
