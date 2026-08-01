@@ -33,3 +33,8 @@ for the full design.
 
 The manual-match web UI has no authentication. It's meant for a LAN/VPN
 trust boundary only — don't port-forward `WEB_UI_PORT` to the internet.
+
+## Third-party licenses
+
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for a full list of
+vendored source and dependencies with their licenses.
