@@ -87,16 +87,61 @@ func TestClient_FindBookByISBN_NotFound(t *testing.T) {
 	}
 }
 
-func TestClient_UpsertUserBook_InsertsWhenAbsent(t *testing.T) {
-	var insertCalled bool
+func TestClient_FetchUserBooks(t *testing.T) {
 	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
 		switch {
 		case strings.Contains(query, "me"):
 			return map[string]any{"me": []map[string]any{{"id": 42, "username": "reader"}}}, nil
 		case strings.Contains(query, "user_books("):
-			return map[string]any{"user_books": []map[string]any{}}, nil
+			return map[string]any{"user_books": []map[string]any{
+				{"id": 100, "book_id": float64(777), "status_id": float64(StatusRead), "rating": nil},
+				{"id": 200, "book_id": float64(888), "status_id": float64(StatusCurrentlyReading), "rating": float64(4)},
+			}}, nil
+		default:
+			t.Fatalf("unexpected query: %s", query)
+			return nil, nil
+		}
+	})
+
+	books, err := c.FetchUserBooks(context.Background())
+	if err != nil {
+		t.Fatalf("FetchUserBooks() error = %v", err)
+	}
+	if len(books) != 2 {
+		t.Fatalf("len(books) = %d, want 2", len(books))
+	}
+	ub777, ok := books[777]
+	if !ok {
+		t.Fatalf("books[777] not found")
+	}
+	if ub777.ID != 100 || ub777.StatusID != StatusRead {
+		t.Errorf("books[777] = %+v, want ID=100 StatusID=%d", ub777, StatusRead)
+	}
+	ub888, ok := books[888]
+	if !ok {
+		t.Fatalf("books[888] not found")
+	}
+	if ub888.ID != 200 || ub888.StatusID != StatusCurrentlyReading {
+		t.Errorf("books[888] = %+v, want ID=200 StatusID=%d", ub888, StatusCurrentlyReading)
+	}
+}
+
+func TestClient_InsertUserBook(t *testing.T) {
+	var insertCalled bool
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		switch {
 		case strings.Contains(query, "insert_user_book"):
 			insertCalled = true
+			object, ok := vars["object"].(map[string]any)
+			if !ok {
+				t.Fatalf("insert called with object = %v, want a map", vars["object"])
+			}
+			if object["book_id"] != float64(777) {
+				t.Errorf("insert object[book_id] = %v, want 777", object["book_id"])
+			}
+			if object["status_id"] != float64(StatusRead) {
+				t.Errorf("insert object[status_id] = %v, want %d", object["status_id"], StatusRead)
+			}
 			return map[string]any{"insert_user_book": map[string]any{"id": 1}}, nil
 		default:
 			t.Fatalf("unexpected query: %s", query)
@@ -104,22 +149,18 @@ func TestClient_UpsertUserBook_InsertsWhenAbsent(t *testing.T) {
 		}
 	})
 
-	if err := c.UpsertUserBook(context.Background(), 777, StatusRead, nil); err != nil {
-		t.Fatalf("UpsertUserBook() error = %v", err)
+	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil); err != nil {
+		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if !insertCalled {
-		t.Error("expected insert_user_book to be called when no existing row")
+		t.Error("expected insert_user_book to be called")
 	}
 }
 
-func TestClient_UpsertUserBook_UpdatesWhenPresent(t *testing.T) {
+func TestClient_UpdateUserBook(t *testing.T) {
 	var updateCalled bool
 	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
 		switch {
-		case strings.Contains(query, "me"):
-			return map[string]any{"me": []map[string]any{{"id": 42, "username": "reader"}}}, nil
-		case strings.Contains(query, "user_books("):
-			return map[string]any{"user_books": []map[string]any{{"id": 555, "status_id": 2, "rating": nil}}}, nil
 		case strings.Contains(query, "update_user_book"):
 			updateCalled = true
 			if vars["id"] != float64(555) {
@@ -139,11 +180,11 @@ func TestClient_UpsertUserBook_UpdatesWhenPresent(t *testing.T) {
 		}
 	})
 
-	if err := c.UpsertUserBook(context.Background(), 777, StatusRead, nil); err != nil {
-		t.Fatalf("UpsertUserBook() error = %v", err)
+	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil); err != nil {
+		t.Fatalf("UpdateUserBook() error = %v", err)
 	}
 	if !updateCalled {
-		t.Error("expected update_user_book to be called when a row already exists")
+		t.Error("expected update_user_book to be called")
 	}
 }
 
@@ -221,62 +262,20 @@ func TestClient_FindBookByISBN_Error(t *testing.T) {
 	}
 }
 
-// TestClient_UpsertUserBook_Table exercises the insert/update branches
-// together with two failure modes: resolving the current user fails, and
-// the existing-row lookup itself fails.
-func TestClient_UpsertUserBook_Table(t *testing.T) {
-	tests := []struct {
-		name    string
-		handler func(t *testing.T) func(query string, vars map[string]any) (any, error)
-		wantErr string
-	}{
-		{
-			name: "error resolving user id",
-			handler: func(t *testing.T) func(string, map[string]any) (any, error) {
-				return func(query string, vars map[string]any) (any, error) {
-					if strings.Contains(query, "me") {
-						return nil, errors.New("Unable to verify token")
-					}
-					t.Fatalf("unexpected query after me failure: %s", query)
-					return nil, nil
-				}
-			},
-			wantErr: "resolve hardcover user id",
-		},
-		{
-			name: "error querying existing user_book",
-			handler: func(t *testing.T) func(string, map[string]any) (any, error) {
-				return func(query string, vars map[string]any) (any, error) {
-					switch {
-					case strings.Contains(query, "me"):
-						return map[string]any{"me": []map[string]any{{"id": 42, "username": "reader"}}}, nil
-					case strings.Contains(query, "user_books("):
-						return nil, errors.New("db timeout")
-					default:
-						t.Fatalf("unexpected query: %s", query)
-						return nil, nil
-					}
-				}
-			},
-			wantErr: "query existing user_book",
-		},
-	}
+// TestClient_FetchUserBooks_Error verifies that a failure resolving the
+// user ID (via Me) propagates as an error from FetchUserBooks.
+func TestClient_FetchUserBooks_Error(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "me") {
+			return nil, errors.New("Unable to verify token")
+		}
+		t.Fatalf("unexpected query after me failure: %s", query)
+		return nil, nil
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, c := newTestServer(t, tt.handler(t))
-
-			err := c.UpsertUserBook(context.Background(), 777, StatusRead, nil)
-			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("UpsertUserBook() error = %v, want containing %q", err, tt.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("UpsertUserBook() error = %v, want nil", err)
-			}
-		})
+	_, err := c.FetchUserBooks(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "resolve hardcover user id") {
+		t.Fatalf("FetchUserBooks() error = %v, want containing %q", err, "resolve hardcover user id")
 	}
 }
 
@@ -679,7 +678,6 @@ func TestClient_RetriesExhausted(t *testing.T) {
 // duplicate read entries on the user's Hardcover library.
 func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 	var mutationAttempts atomic.Int32
-	var meDone, findDone bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody struct {
 			Query string `json:"query"`
@@ -687,28 +685,15 @@ func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
-		switch {
-		case strings.Contains(reqBody.Query, "me") && !meDone:
-			meDone = true
-			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-				"me": []map[string]any{{"id": 42, "username": "test"}},
-			}})
-		case strings.Contains(reqBody.Query, "user_books(") && !findDone:
-			findDone = true
-			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-				"user_books": []map[string]any{}, // no existing row → INSERT path
-			}})
-		default:
-			// This is the mutation (insert_user_book) — 429 it.
-			// Verify the mutation header is set so retryPolicy can identify it.
-			if r.Header.Get("X-GraphQL-Operation") != "mutation" {
-				t.Errorf("X-GraphQL-Operation = %q, want %q for mutation", r.Header.Get("X-GraphQL-Operation"), "mutation")
-			}
-			mutationAttempts.Add(1)
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(map[string]any{"error": "Throttled"})
+		// This is the mutation (insert_user_book) — 429 it.
+		// Verify the mutation header is set so retryPolicy can identify it.
+		if r.Header.Get("X-GraphQL-Operation") != "mutation" {
+			t.Errorf("X-GraphQL-Operation = %q, want %q for mutation", r.Header.Get("X-GraphQL-Operation"), "mutation")
 		}
+		mutationAttempts.Add(1)
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]any{"error": "Throttled"})
 	}))
 	t.Cleanup(srv.Close)
 
@@ -725,9 +710,9 @@ func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 	c.endpoint = srv.URL
 	c.httpClient = rc.StandardClient()
 
-	err := c.UpsertUserBook(context.Background(), 777, StatusRead, nil)
+	err := c.InsertUserBook(context.Background(), 777, StatusRead, nil)
 	if err == nil {
-		t.Fatal("UpsertUserBook() error = nil, want error for 429 on mutation")
+		t.Fatal("InsertUserBook() error = nil, want error for 429 on mutation")
 	}
 	if got := mutationAttempts.Load(); got != 1 {
 		t.Errorf("mutation attempts = %d, want 1 (mutations must not be retried on 429)", got)

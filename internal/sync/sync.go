@@ -3,6 +3,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
@@ -22,7 +23,9 @@ type AudibleClient interface {
 type HardcoverClient interface {
 	FindBookByISBN(ctx context.Context, isbn string) (int64, bool, error)
 	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
-	UpsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error
+	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
+	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error
+	UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64) error
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -75,6 +78,17 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		return result, err
 	}
 
+	// Fetch all of the user's existing Hardcover library entries in one
+	// query so we can check status in memory — avoiding a per-book
+	// FindUserBook query for every item, and enabling the "never
+	// downgrade" rule (a book already marked Read on Hardcover is never
+	// downgraded to Currently Reading just because the Audible audiobook
+	// is still in progress).
+	userBooks, err := d.Hardcover.FetchUserBooks(ctx)
+	if err != nil {
+		return result, fmt.Errorf("fetch hardcover user books: %w", err)
+	}
+
 	var newlyUnmatched []state.BookState
 
 	for _, item := range items {
@@ -123,10 +137,29 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
-		if err := d.Hardcover.UpsertUserBook(ctx, bookID, statusID, nil); err != nil {
-			slog.Error("upsert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
-			result.Errored++
-			continue
+		// Check the in-memory cache of the user's Hardcover library:
+		// if the book is already there with a status >= the new status,
+		// skip the API call entirely — never downgrade a status that
+		// was set via another source (print read, manual, etc.), and
+		// never make a redundant API call for an already-correct status.
+		if existing, hasExisting := userBooks[bookID]; hasExisting {
+			if existing.StatusID >= statusID {
+				result.Unchanged++
+				continue
+			}
+			// Upgrade: existing status is lower, update it.
+			if err := d.Hardcover.UpdateUserBook(ctx, existing.ID, statusID, nil); err != nil {
+				slog.Error("update hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
+				result.Errored++
+				continue
+			}
+		} else {
+			// New book — insert it.
+			if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, nil); err != nil {
+				slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
+				result.Errored++
+				continue
+			}
 		}
 
 		if err := d.Store.Upsert(state.BookState{

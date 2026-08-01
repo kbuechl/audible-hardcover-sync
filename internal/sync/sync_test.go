@@ -32,7 +32,9 @@ type fakeHardcover struct {
 	byISBN        map[string]int64
 	searchResults map[string][]hardcover.SearchResult
 	searchErr     error
-	upserted      map[int64]upsertCall
+	userBooks     map[int64]hardcover.UserBook // pre-seeded cache for FetchUserBooks
+	inserted      map[int64]upsertCall         // bookID → call
+	updated       map[int64]upsertCall         // rowID → call
 	upsertErr     error
 }
 
@@ -40,7 +42,9 @@ func newFakeHardcover() *fakeHardcover {
 	return &fakeHardcover{
 		byISBN:        map[string]int64{},
 		searchResults: map[string][]hardcover.SearchResult{},
-		upserted:      map[int64]upsertCall{},
+		userBooks:     map[int64]hardcover.UserBook{},
+		inserted:      map[int64]upsertCall{},
+		updated:       map[int64]upsertCall{},
 	}
 }
 
@@ -56,11 +60,28 @@ func (f *fakeHardcover) SearchBooks(ctx context.Context, query string, perPage i
 	return f.searchResults[query], nil
 }
 
-func (f *fakeHardcover) UpsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
+func (f *fakeHardcover) FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error) {
+	// Return a copy so the test's seed map isn't mutated by the sync loop.
+	out := make(map[int64]hardcover.UserBook, len(f.userBooks))
+	for k, v := range f.userBooks {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
-	f.upserted[bookID] = upsertCall{statusID, rating}
+	f.inserted[bookID] = upsertCall{statusID, rating}
+	return nil
+}
+
+func (f *fakeHardcover) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64) error {
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
+	f.updated[rowID] = upsertCall{statusID, rating}
 	return nil
 }
 
@@ -100,6 +121,7 @@ func TestRun(t *testing.T) {
 		byISBN          map[string]int64
 		searchResults   map[string][]hardcover.SearchResult
 		searchErr       error
+		userBooks       map[int64]hardcover.UserBook // pre-seeded Hardcover library cache
 		matchConfidence float64
 		upsertErr       error
 		seed            *state.BookState
@@ -111,22 +133,22 @@ func TestRun(t *testing.T) {
 				{ASIN: "A1", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
 			},
 			byISBN: map[string]int64{"9780641723445": 777},
-			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
-				if result.Synced != 1 {
-					t.Errorf("Synced = %d, want 1", result.Synced)
-				}
-				got := fh.upserted[777]
-				if got.statusID != 3 {
-					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
-				}
-				bs, err := store.Get("A1")
-				if err != nil {
-					t.Fatalf("store.Get() error = %v", err)
-				}
-				if bs == nil || bs.Status != state.StatusFinished {
-					t.Errorf("stored state = %+v, want status finished", bs)
-				}
-			},
+check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+			if result.Synced != 1 {
+				t.Errorf("Synced = %d, want 1", result.Synced)
+			}
+			got := fh.inserted[777]
+			if got.statusID != 3 {
+				t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+			}
+			bs, err := store.Get("A1")
+			if err != nil {
+				t.Fatalf("store.Get() error = %v", err)
+			}
+			if bs == nil || bs.Status != state.StatusFinished {
+				t.Errorf("stored state = %+v, want status finished", bs)
+			}
+		},
 		},
 		{
 			name: "in-progress book syncs as currently reading",
@@ -138,9 +160,9 @@ func TestRun(t *testing.T) {
 				if result.Synced != 1 {
 					t.Errorf("Synced = %d, want 1", result.Synced)
 				}
-				if fh.upserted[777].statusID != 2 {
-					t.Errorf("statusID = %d, want 2 (Currently Reading)", fh.upserted[777].statusID)
-				}
+if fh.inserted[777].statusID != 2 {
+				t.Errorf("statusID = %d, want 2 (Currently Reading)", fh.inserted[777].statusID)
+			}
 			},
 		},
 		{
@@ -149,9 +171,9 @@ func TestRun(t *testing.T) {
 				{ASIN: "A3", ISBN13: "9780641723445", IsFinished: false, PercentComplete: 0},
 			},
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
-				if result.Synced != 0 || len(fh.upserted) != 0 {
-					t.Errorf("expected no sync for a not-started book, got Synced=%d upserted=%v", result.Synced, fh.upserted)
-				}
+if result.Synced != 0 || len(fh.inserted) != 0 {
+				t.Errorf("expected no sync for a not-started book, got Synced=%d inserted=%v", result.Synced, fh.inserted)
+			}
 			},
 		},
 		{
@@ -165,9 +187,9 @@ func TestRun(t *testing.T) {
 				if result.Unchanged != 1 {
 					t.Errorf("Unchanged = %d, want 1", result.Unchanged)
 				}
-				if len(fh.upserted) != 0 {
-					t.Errorf("expected no Hardcover call for an unchanged book, got %v", fh.upserted)
-				}
+if len(fh.inserted) != 0 {
+				t.Errorf("expected no Hardcover call for an unchanged book, got %v", fh.inserted)
+			}
 			},
 		},
 		{
@@ -229,9 +251,9 @@ func TestRun(t *testing.T) {
 				if result.Synced != 1 {
 					t.Errorf("Synced = %d, want 1", result.Synced)
 				}
-				got, ok := fh.upserted[777]
+				got, ok := fh.inserted[777]
 				if !ok {
-					t.Fatalf("upserted = %v, want an entry for book id 777", fh.upserted)
+					t.Fatalf("inserted = %v, want an entry for book id 777", fh.inserted)
 				}
 				if got.statusID != 3 {
 					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
@@ -246,7 +268,7 @@ func TestRun(t *testing.T) {
 			// the next sync pass does NOT treat it as unchanged (since ""
 			// can never equal a real state.Status constant) and instead
 			// reuses the cached HardcoverBookID to make a real
-			// UpsertUserBook call, so a manually-resolved book actually
+			// InsertUserBook call, so a manually-resolved book actually
 			// gets synced to Hardcover.
 			name: "webui-resolved state (empty status) is synced, not skipped as unchanged",
 			items: []audible.LibraryItem{
@@ -261,9 +283,9 @@ func TestRun(t *testing.T) {
 				if result.Synced != 1 {
 					t.Errorf("Synced = %d, want 1 (must not be skipped as unchanged)", result.Synced)
 				}
-				got, ok := fh.upserted[777]
+				got, ok := fh.inserted[777]
 				if !ok {
-					t.Fatalf("upserted = %v, want an entry for cached book id 777", fh.upserted)
+					t.Fatalf("inserted = %v, want an entry for cached book id 777", fh.inserted)
 				}
 				if got.statusID != 3 {
 					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
@@ -291,9 +313,9 @@ func TestRun(t *testing.T) {
 				if result.Synced != 1 {
 					t.Errorf("Synced = %d, want 1", result.Synced)
 				}
-				got, ok := fh.upserted[888]
+				got, ok := fh.inserted[888]
 				if !ok {
-					t.Fatalf("upserted = %v, want an entry for book id 888", fh.upserted)
+					t.Fatalf("inserted = %v, want an entry for book id 888", fh.inserted)
 				}
 				if got.statusID != 3 {
 					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
@@ -313,8 +335,80 @@ func TestRun(t *testing.T) {
 				if result.Unmatched != 1 {
 					t.Errorf("Unmatched = %d, want 1", result.Unmatched)
 				}
-				if len(fh.upserted) != 0 {
-					t.Errorf("expected no Hardcover upsert for a low-confidence match, got %v", fh.upserted)
+				if len(fh.inserted) != 0 {
+					t.Errorf("expected no Hardcover upsert for a low-confidence match, got %v", fh.inserted)
+				}
+			},
+		},
+		{
+			name: "book already read on hardcover is not downgraded to in-progress",
+			items: []audible.LibraryItem{
+				{ASIN: "A13", ISBN13: "9780641723445", IsFinished: false, PercentComplete: 40},
+			},
+			byISBN: map[string]int64{"9780641723445": 777},
+			// Book 777 is already marked Read (3) on Hardcover — maybe
+			// the user read it in print. Audible says in-progress (2).
+			// The sync must NOT downgrade it to Currently Reading.
+			userBooks: map[int64]hardcover.UserBook{
+				777: {ID: 500, BookID: 777, StatusID: 3},
+			},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Unchanged != 1 {
+					t.Errorf("Unchanged = %d, want 1 (already-read book must not be downgraded)", result.Unchanged)
+				}
+				if len(fh.updated) != 0 {
+					t.Errorf("expected no update call for a book already at a higher status, got %v", fh.updated)
+				}
+				if len(fh.inserted) != 0 {
+					t.Errorf("expected no insert call for an existing book, got %v", fh.inserted)
+				}
+			},
+		},
+		{
+			name: "book currently reading on hardcover is upgraded to read",
+			items: []audible.LibraryItem{
+				{ASIN: "A14", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
+			},
+			byISBN: map[string]int64{"9780641723445": 777},
+			// Book 777 is Currently Reading (2) on Hardcover. Audible
+			// says finished → Read (3). This is a legitimate upgrade.
+			userBooks: map[int64]hardcover.UserBook{
+				777: {ID: 500, BookID: 777, StatusID: 2},
+			},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Errorf("Synced = %d, want 1 (upgrade from Currently Reading to Read)", result.Synced)
+				}
+				got, ok := fh.updated[500]
+				if !ok {
+					t.Fatalf("updated = %v, want an entry for row id 500", fh.updated)
+				}
+				if got.statusID != 3 {
+					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+				}
+				if len(fh.inserted) != 0 {
+					t.Errorf("expected no insert for an existing book, got %v", fh.inserted)
+				}
+			},
+		},
+		{
+			name: "book already read on hardcover stays read, no api call",
+			items: []audible.LibraryItem{
+				{ASIN: "A15", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
+			},
+			byISBN: map[string]int64{"9780641723445": 777},
+			// Book 777 is already Read (3) on Hardcover. Audible also
+			// says finished → Read (3). Status is equal — no API call
+			// needed at all.
+			userBooks: map[int64]hardcover.UserBook{
+				777: {ID: 500, BookID: 777, StatusID: 3},
+			},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Unchanged != 1 {
+					t.Errorf("Unchanged = %d, want 1 (already-read, no API call needed)", result.Unchanged)
+				}
+				if len(fh.updated) != 0 || len(fh.inserted) != 0 {
+					t.Errorf("expected no API calls for equal status, got updated=%v inserted=%v", fh.updated, fh.inserted)
 				}
 			},
 		},
@@ -346,8 +440,8 @@ func TestRun(t *testing.T) {
 				if result.Errored != 1 {
 					t.Errorf("Errored = %d, want 1", result.Errored)
 				}
-				if len(fh.upserted) != 0 {
-					t.Errorf("expected no upsert on search failure, got %v", fh.upserted)
+				if len(fh.inserted) != 0 {
+					t.Errorf("expected no upsert on search failure, got %v", fh.inserted)
 				}
 			},
 		},
@@ -365,6 +459,9 @@ func TestRun(t *testing.T) {
 			}
 			fh.upsertErr = tt.upsertErr
 		fh.searchErr = tt.searchErr
+		for bookID, ub := range tt.userBooks {
+			fh.userBooks[bookID] = ub
+		}
 			store := newTestStore(t)
 			if tt.seed != nil {
 				if err := store.Upsert(*tt.seed); err != nil {

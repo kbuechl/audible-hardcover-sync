@@ -307,55 +307,89 @@ func (c *Client) FetchCoverURLs(ctx context.Context, bookIDs []int64) (map[int64
 	return urls, nil
 }
 
-// UpsertUserBook sets the reading status (and, if non-nil, rating) for a
-// book in the authenticated user's Hardcover library. It queries for an
-// existing user_books row first because insert_user_book errors on a
-// duplicate (book_id, user_id) pair rather than upserting.
-//
-// The two mutation shapes below (argument types and the update mutation's
-// name/args) were confirmed via live GraphQL introspection against
-// Hardcover's real API on 2026-08-01 — the API is documented as "beta" and
-// this project's original design could only infer likely shapes from Hasura
-// conventions, not verify them, which is exactly what caused this bug.
-func (c *Client) UpsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
+// UserBook is a single entry in the user's Hardcover library, as
+// returned by FetchUserBooks. ID is the user_books row ID (needed for
+// updates); BookID is the books table ID (used as the cache key).
+type UserBook struct {
+	ID       int64
+	BookID   int64
+	StatusID int
+	Rating   *float64
+}
+
+// FetchUserBooks fetches all of the authenticated user's user_books rows
+// in a single query and returns them as a map keyed by book_id. This is
+// called once at the start of a sync pass so the orchestrator can check
+// existing status in memory — avoiding a per-book FindUserBook query
+// (and its rate-limit cost) for every item in the library.
+func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error) {
 	userID, err := c.userIDCached(ctx)
 	if err != nil {
-		return fmt.Errorf("resolve hardcover user id: %w", err)
+		return nil, fmt.Errorf("resolve hardcover user id: %w", err)
 	}
 
-	var existing struct {
+	var out struct {
 		UserBooks []struct {
-			ID       int64    `json:"id"`
-			StatusID int      `json:"status_id"`
-			Rating   *float64 `json:"rating"`
+			ID       int64        `json:"id"`
+			BookID   int64        `json:"book_id"`
+			StatusID int          `json:"status_id"`
+			Rating   *float64     `json:"rating"`
 		} `json:"user_books"`
 	}
-	findQuery := `query FindUserBook($userID: Int!, $bookID: Int!) {
-		user_books(where: {user_id: {_eq: $userID}, book_id: {_eq: $bookID}}, limit: 1) {
+	gqlQuery := `query FetchUserBooks($userID: Int!) {
+		user_books(where: {user_id: {_eq: $userID}}) {
 			id
+			book_id
 			status_id
 			rating
 		}
 	}`
-	if err := c.do(ctx, findQuery, map[string]any{"userID": userID, "bookID": bookID}, &existing); err != nil {
-		return fmt.Errorf("query existing user_book: %w", err)
+	if err := c.do(ctx, gqlQuery, map[string]any{"userID": userID}, &out); err != nil {
+		return nil, fmt.Errorf("fetch user books: %w", err)
 	}
 
-	if len(existing.UserBooks) == 0 {
-		insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
-			insert_user_book(object: $object) { id }
-		}`
-		object := map[string]any{"book_id": bookID, "status_id": statusID}
-		if rating != nil {
-			object["rating"] = *rating
+	books := make(map[int64]UserBook, len(out.UserBooks))
+	for _, ub := range out.UserBooks {
+		books[ub.BookID] = UserBook{
+			ID:       ub.ID,
+			BookID:   ub.BookID,
+			StatusID: ub.StatusID,
+			Rating:   ub.Rating,
 		}
-		if err := c.do(ctx, insertQuery, map[string]any{"object": object}, nil); err != nil {
-			return fmt.Errorf("insert user_book: %w", err)
-		}
-		return nil
 	}
+	return books, nil
+}
 
-	row := existing.UserBooks[0]
+// InsertUserBook adds a new book to the user's Hardcover library with
+// the given status (and optional rating). It does NOT check for an
+// existing row first — the caller is responsible for using
+// FetchUserBooks to decide whether to insert or update.
+//
+// The mutation shape (argument types) was confirmed via live GraphQL
+// introspection against Hardcover's real API on 2026-08-01.
+func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
+	insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
+		insert_user_book(object: $object) { id }
+	}`
+	object := map[string]any{"book_id": bookID, "status_id": statusID}
+	if rating != nil {
+		object["rating"] = *rating
+	}
+	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, nil); err != nil {
+		return fmt.Errorf("insert user_book: %w", err)
+	}
+	return nil
+}
+
+// UpdateUserBook updates an existing user_books row (identified by its
+// row ID from FetchUserBooks) with a new status (and optional rating).
+// It does NOT check for an existing row first — the caller supplies the
+// row ID from the FetchUserBooks cache.
+//
+// The mutation shape (argument types and the update mutation's name/args)
+// was confirmed via live GraphQL introspection against Hardcover's real
+// API on 2026-08-01.
+func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64) error {
 	updateQuery := `mutation UpdateUserBook($id: Int!, $object: UserBookUpdateInput!) {
 		update_user_book(id: $id, object: $object) { id }
 	}`
@@ -363,8 +397,8 @@ func (c *Client) UpsertUserBook(ctx context.Context, bookID int64, statusID int,
 	if rating != nil {
 		object["rating"] = *rating
 	}
-	if err := c.do(ctx, updateQuery, map[string]any{"id": row.ID, "object": object}, nil); err != nil {
-		return fmt.Errorf("update user_book %d: %w", row.ID, err)
+	if err := c.do(ctx, updateQuery, map[string]any{"id": rowID, "object": object}, nil); err != nil {
+		return fmt.Errorf("update user_book %d: %w", rowID, err)
 	}
 	return nil
 }
