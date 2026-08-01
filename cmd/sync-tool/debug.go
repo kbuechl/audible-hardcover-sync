@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -33,4 +34,31 @@ func runDebugLibrary(ctx context.Context, credentialsPath string, stdout io.Writ
 			item.ASIN, item.IsFinished, item.PercentComplete, item.Title)
 	}
 	return nil
+}
+
+// TEMPORARY diagnostic — dumps the raw JSON of the first page of the Audible
+// library (with the listening_status response group) so we can see what date
+// fields Audible actually returns. Read-only. Remove after investigating
+// available date fields (2026-08-01).
+func runDebugRawLibrary(ctx context.Context, credentialsPath string, stdout io.Writer) error {
+	client := audible.New(audiblesdk.MarketplaceUS)
+	if err := client.LoadCredentialsFile(credentialsPath); err != nil {
+		return fmt.Errorf("load audible credentials (run 'sync-tool auth' first): %w", err)
+	}
+
+	raw, err := client.FetchRawLibrary(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch raw audible library: %w", err)
+	}
+
+	// Pretty-print the raw JSON so it's readable
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		// If it's not valid JSON, just dump the raw bytes
+		stdout.Write(raw)
+		return nil
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(parsed)
 }

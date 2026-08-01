@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	audiblesdk "github.com/mstrhakr/go-audible"
 )
@@ -22,6 +24,13 @@ type LibraryItem struct {
 	ISBN13          string
 	IsFinished      bool
 	PercentComplete float64
+	// FinishedAt is the timestamp when the user finished listening to
+	// the book, from Audible's listening_status.finished_at_timestamp.
+	// Nil if the book isn't finished or the timestamp is absent/unparseable.
+	FinishedAt *time.Time
+	// DateAdded is when the book was added to the user's Audible library,
+	// from library_status.date_added. Nil if absent/unparseable.
+	DateAdded *time.Time
 }
 
 // responseGroups extends the SDK's default set (WithResponseGroups replaces
@@ -87,6 +96,15 @@ func (c *Client) SaveCredentialsFile(path string) error {
 	return nil
 }
 
+// FetchRawLibrary fetches the first page of the Audible library as raw
+// JSON bytes, without unmarshaling into LibraryItem. This preserves all
+// fields returned by the API (including any not modeled by LibraryItem),
+// which is useful for debugging which fields Audible actually returns.
+// TEMPORARY: for investigating available date fields (2026-08-01).
+func (c *Client) FetchRawLibrary(ctx context.Context) ([]byte, error) {
+	return c.sdk.GetRawLibrary(ctx, audiblesdk.WithResponseGroups(responseGroups...))
+}
+
 func (c *Client) FetchLibrary(ctx context.Context) ([]LibraryItem, error) {
 	books, err := c.sdk.GetAllLibrary(ctx, audiblesdk.WithResponseGroups(responseGroups...))
 	if err != nil {
@@ -113,5 +131,28 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 		ISBN13:          b.ISBN13,
 		IsFinished:      b.IsFinished,
 		PercentComplete: b.PercentComplete,
+		FinishedAt:      parseAudibleTimestamp(b.ListeningStatus.FinishedAtTimestamp),
+		DateAdded:       parseAudibleTimestamp(b.LibraryStatus.DateAdded),
 	}
+}
+
+// parseAudibleTimestamp parses an ISO 8601 timestamp from Audible's API
+// (e.g. "2025-10-11T19:34:29.561Z"). Returns nil if the string is empty
+// or unparseable — the caller treats nil as "no date available".
+func parseAudibleTimestamp(s string) *time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		// Audible timestamps may have millisecond precision with a 'Z'
+		// suffix which RFC3339 handles, but try a couple of fallbacks
+		// just in case.
+		t, err = time.Parse("2006-01-02T15:04:05.000000Z", s)
+		if err != nil {
+			return nil
+		}
+	}
+	return &t
 }

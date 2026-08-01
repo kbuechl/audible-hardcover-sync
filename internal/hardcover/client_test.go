@@ -149,7 +149,7 @@ func TestClient_InsertUserBook(t *testing.T) {
 		}
 	})
 
-	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil); err != nil {
+	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if !insertCalled {
@@ -180,7 +180,7 @@ func TestClient_UpdateUserBook(t *testing.T) {
 		}
 	})
 
-	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil); err != nil {
+	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, nil); err != nil {
 		t.Fatalf("UpdateUserBook() error = %v", err)
 	}
 	if !updateCalled {
@@ -264,6 +264,65 @@ func TestClient_FindBookByISBN_Error(t *testing.T) {
 
 // TestClient_FetchUserBooks_Error verifies that a failure resolving the
 // user ID (via Me) propagates as an error from FetchUserBooks.
+func TestClient_InsertUserBook_WithUserDate(t *testing.T) {
+	var capturedObject map[string]any
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "insert_user_book") {
+			capturedObject = vars["object"].(map[string]any)
+			return map[string]any{"insert_user_book": map[string]any{"id": 1}}, nil
+		}
+		t.Fatalf("unexpected query: %s", query)
+		return nil, nil
+	})
+
+	finishedAt := time.Date(2025, 10, 11, 19, 34, 29, 0, time.UTC)
+	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, &finishedAt); err != nil {
+		t.Fatalf("InsertUserBook() error = %v", err)
+	}
+	if got := capturedObject["user_date"]; got != "2025-10-11" {
+		t.Errorf("object[user_date] = %v, want %q", got, "2025-10-11")
+	}
+}
+
+func TestClient_InsertUserBook_WithoutUserDate(t *testing.T) {
+	var capturedObject map[string]any
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "insert_user_book") {
+			capturedObject = vars["object"].(map[string]any)
+			return map[string]any{"insert_user_book": map[string]any{"id": 1}}, nil
+		}
+		t.Fatalf("unexpected query: %s", query)
+		return nil, nil
+	})
+
+	if err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil); err != nil {
+		t.Fatalf("InsertUserBook() error = %v", err)
+	}
+	if _, hasDate := capturedObject["user_date"]; hasDate {
+		t.Errorf("object[user_date] = %v, want absent for nil userDate", capturedObject["user_date"])
+	}
+}
+
+func TestClient_UpdateUserBook_WithUserDate(t *testing.T) {
+	var capturedObject map[string]any
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "update_user_book") {
+			capturedObject = vars["object"].(map[string]any)
+			return map[string]any{"update_user_book": map[string]any{"id": 555}}, nil
+		}
+		t.Fatalf("unexpected query: %s", query)
+		return nil, nil
+	})
+
+	finishedAt := time.Date(2025, 10, 11, 19, 34, 29, 0, time.UTC)
+	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, &finishedAt); err != nil {
+		t.Fatalf("UpdateUserBook() error = %v", err)
+	}
+	if got := capturedObject["user_date"]; got != "2025-10-11" {
+		t.Errorf("object[user_date] = %v, want %q", got, "2025-10-11")
+	}
+}
+
 func TestClient_FetchUserBooks_Error(t *testing.T) {
 	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
 		if strings.Contains(query, "me") {
@@ -710,7 +769,7 @@ func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 	c.endpoint = srv.URL
 	c.httpClient = rc.StandardClient()
 
-	err := c.InsertUserBook(context.Background(), 777, StatusRead, nil)
+	err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil)
 	if err == nil {
 		t.Fatal("InsertUserBook() error = nil, want error for 429 on mutation")
 	}

@@ -54,6 +54,31 @@ type Book struct {
 	ContentDeliveryType string         `json:"content_delivery_type"`
 	ContentType         string         `json:"content_type"`
 	IsAyce              bool           `json:"is_ayce"`
+
+	// ListeningStatus captures listening progress data from the
+	// "listening_status" response group, including the timestamp when
+	// the user finished the book. Populated only when the
+	// "listening_status" response group is requested.
+	ListeningStatus ListeningStatus `json:"listening_status,omitempty"`
+	// LibraryStatus captures library metadata from the "listening_status"
+	// response group, including when the book was added to the user's
+	// library.
+	LibraryStatus LibraryStatus `json:"library_status,omitempty"`
+}
+
+// ListeningStatus holds listening progress data returned by the
+// "listening_status" response group.
+type ListeningStatus struct {
+	FinishedAtTimestamp   string `json:"finished_at_timestamp,omitempty"`
+	IsFinished            bool   `json:"is_finished"`
+	PercentComplete       float64 `json:"percent_complete"`
+	TimeRemainingSeconds  int    `json:"time_remaining_seconds"`
+}
+
+// LibraryStatus holds library metadata returned alongside the
+// "listening_status" response group.
+type LibraryStatus struct {
+	DateAdded string `json:"date_added,omitempty"`
 }
 
 // BestID returns the most specific available identifier in priority order:
@@ -159,6 +184,8 @@ func (b *Book) UnmarshalJSON(data []byte) error {
 		ContentDeliveryType string         `json:"content_delivery_type"`
 		ContentType         string         `json:"content_type"`
 		IsAyce              bool           `json:"is_ayce"`
+		ListeningStatus     ListeningStatus `json:"listening_status,omitempty"`
+		LibraryStatus       LibraryStatus   `json:"library_status,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -187,6 +214,8 @@ func (b *Book) UnmarshalJSON(data []byte) error {
 	b.ContentDeliveryType = raw.ContentDeliveryType
 	b.ContentType = raw.ContentType
 	b.IsAyce = raw.IsAyce
+	b.ListeningStatus = raw.ListeningStatus
+	b.LibraryStatus = raw.LibraryStatus
 
 	// Initialize identifier fields before classification.
 	b.ASIN, b.ISBN10, b.ISBN13, b.OtherID = "", "", "", ""
@@ -329,6 +358,37 @@ var DefaultResponseGroups = []string{
 	"sample",
 	"series",
 	"sku",
+}
+
+// GetRawLibrary retrieves the user's Audible library as raw JSON bytes,
+// without unmarshaling into the Book struct. This preserves all fields
+// returned by the API (including any not modeled by Book), which is
+// useful for debugging which fields Audible actually returns for a
+// given response group.
+func (c *Client) GetRawLibrary(ctx context.Context, opts ...LibraryOption) ([]byte, error) {
+	options := &libraryOptions{
+		responseGroups: DefaultResponseGroups,
+		pageSize:       50,
+		page:           1,
+		sortBy:         "-PurchaseDate",
+	}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	params := url.Values{
+		"response_groups": []string{strings.Join(options.responseGroups, ",")},
+		"num_results":     []string{strconv.Itoa(options.pageSize)},
+		"page":            []string{strconv.Itoa(options.page)},
+		"sort_by":         []string{options.sortBy},
+	}
+
+	if options.purchasedAfter != "" {
+		params.Set("purchased_after", options.purchasedAfter)
+	}
+
+	path := "/1.0/library?" + params.Encode()
+	return c.doAPIRequest(ctx, "GET", path, "")
 }
 
 // GetLibrary retrieves the user's Audible library.

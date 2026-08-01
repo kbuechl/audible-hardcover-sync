@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
 	"github.com/kbuechl/audible-hardcover-sync/internal/hardcover"
@@ -24,8 +25,8 @@ type HardcoverClient interface {
 	FindBookByISBN(ctx context.Context, isbn string) (int64, bool, error)
 	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
 	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
-	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error
-	UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64) error
+	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64, userDate *time.Time) error
+	UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64, userDate *time.Time) error
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -137,6 +138,14 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
+		// userDate is the finished-listening date from Audible, passed to
+		// Hardcover as user_date (the "end date" in the reading log).
+		// Only set for finished books — in-progress books have no end date.
+		var userDate *time.Time
+		if status == state.StatusFinished {
+			userDate = item.FinishedAt
+		}
+
 		// Check the in-memory cache of the user's Hardcover library:
 		// if the book is already there with a status >= the new status,
 		// skip the API call entirely — never downgrade a status that
@@ -148,14 +157,14 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 				continue
 			}
 			// Upgrade: existing status is lower, update it.
-			if err := d.Hardcover.UpdateUserBook(ctx, existing.ID, statusID, nil); err != nil {
+			if err := d.Hardcover.UpdateUserBook(ctx, existing.ID, statusID, nil, userDate); err != nil {
 				slog.Error("update hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
 				result.Errored++
 				continue
 			}
 		} else {
 			// New book — insert it.
-			if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, nil); err != nil {
+			if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, nil, userDate); err != nil {
 				slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
 				result.Errored++
 				continue

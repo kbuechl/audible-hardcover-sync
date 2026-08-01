@@ -361,19 +361,27 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 }
 
 // InsertUserBook adds a new book to the user's Hardcover library with
-// the given status (and optional rating). It does NOT check for an
-// existing row first — the caller is responsible for using
+// the given status (and optional rating and finished date). It does NOT
+// check for an existing row first — the caller is responsible for using
 // FetchUserBooks to decide whether to insert or update.
+//
+// userDate is the date the user finished the book (from Audible's
+// listening_status.finished_at_timestamp), or nil if not available.
+// It maps to Hardcover's user_date field (the "end date" shown in the
+// reading log). Only set for finished books.
 //
 // The mutation shape (argument types) was confirmed via live GraphQL
 // introspection against Hardcover's real API on 2026-08-01.
-func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
+func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64, userDate *time.Time) error {
 	insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
 		insert_user_book(object: $object) { id }
 	}`
 	object := map[string]any{"book_id": bookID, "status_id": statusID}
 	if rating != nil {
 		object["rating"] = *rating
+	}
+	if userDate != nil {
+		object["user_date"] = userDate.Format("2006-01-02")
 	}
 	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, nil); err != nil {
 		return fmt.Errorf("insert user_book: %w", err)
@@ -382,20 +390,28 @@ func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int,
 }
 
 // UpdateUserBook updates an existing user_books row (identified by its
-// row ID from FetchUserBooks) with a new status (and optional rating).
-// It does NOT check for an existing row first — the caller supplies the
-// row ID from the FetchUserBooks cache.
+// row ID from FetchUserBooks) with a new status (and optional rating and
+// finished date). It does NOT check for an existing row first — the
+// caller supplies the row ID from the FetchUserBooks cache.
+//
+// userDate is the date the user finished the book (from Audible's
+// listening_status.finished_at_timestamp), or nil if not available.
+// It maps to Hardcover's user_date field (the "end date" shown in the
+// reading log). Only set for finished books.
 //
 // The mutation shape (argument types and the update mutation's name/args)
 // was confirmed via live GraphQL introspection against Hardcover's real
 // API on 2026-08-01.
-func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64) error {
+func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64, userDate *time.Time) error {
 	updateQuery := `mutation UpdateUserBook($id: Int!, $object: UserBookUpdateInput!) {
 		update_user_book(id: $id, object: $object) { id }
 	}`
 	object := map[string]any{"status_id": statusID}
 	if rating != nil {
 		object["rating"] = *rating
+	}
+	if userDate != nil {
+		object["user_date"] = userDate.Format("2006-01-02")
 	}
 	if err := c.do(ctx, updateQuery, map[string]any{"id": rowID, "object": object}, nil); err != nil {
 		return fmt.Errorf("update user_book %d: %w", rowID, err)

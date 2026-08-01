@@ -7,6 +7,7 @@ replace github.com/mstrhakr/go-audible => ./third_party/go-audible
 require (
 	github.com/adrg/strutil v0.3.1
 	github.com/containrrr/shoutrrr v0.8.0
+	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/mstrhakr/go-audible v0.2.7
 	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.54.0
@@ -17,7 +18,6 @@ require (
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

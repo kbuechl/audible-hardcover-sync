@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve|debug-library>")
+		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve|debug-library|debug-raw-library>")
 		os.Exit(1)
 	}
 
@@ -42,6 +42,14 @@ func main() {
 		credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
 		if err := runDebugLibrary(ctx, credentialsPath, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "debug-library failed:", err)
+			os.Exit(1)
+		}
+	// TEMPORARY diagnostic — dumps raw Audible library JSON to investigate
+	// available date fields (2026-08-01).
+	case "debug-raw-library":
+		credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
+		if err := runDebugRawLibrary(ctx, credentialsPath, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "debug-raw-library failed:", err)
 			os.Exit(1)
 		}
 	case "serve":
