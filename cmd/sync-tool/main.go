@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve>")
+		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve|debug-library>")
 		os.Exit(1)
 	}
 
@@ -35,6 +35,13 @@ func main() {
 		}
 		if _, err := runOnce(ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "sync failed:", err)
+			os.Exit(1)
+		}
+	// TEMPORARY diagnostic — remove after debugging the Black Tongue Thief is_finished discrepancy (2026-08-01).
+	case "debug-library":
+		credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
+		if err := runDebugLibrary(ctx, credentialsPath, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "debug-library failed:", err)
 			os.Exit(1)
 		}
 	case "serve":
