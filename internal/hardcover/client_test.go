@@ -116,9 +116,19 @@ func TestClient_UpsertUserBook_UpdatesWhenPresent(t *testing.T) {
 			return map[string]any{"me": []map[string]any{{"id": 42, "username": "reader"}}}, nil
 		case strings.Contains(query, "user_books("):
 			return map[string]any{"user_books": []map[string]any{{"id": 555, "status_id": 2, "rating": nil}}}, nil
-		case strings.Contains(query, "update_user_book_by_pk"):
+		case strings.Contains(query, "update_user_book"):
 			updateCalled = true
-			return map[string]any{"update_user_book_by_pk": map[string]any{"id": 555}}, nil
+			if vars["id"] != float64(555) {
+				t.Errorf("update called with id = %v, want 555", vars["id"])
+			}
+			object, ok := vars["object"].(map[string]any)
+			if !ok {
+				t.Fatalf("update called with object = %v (%T), want a map", vars["object"], vars["object"])
+			}
+			if object["status_id"] != float64(StatusRead) {
+				t.Errorf("update object[status_id] = %v, want %d", object["status_id"], StatusRead)
+			}
+			return map[string]any{"update_user_book": map[string]any{"id": 555}}, nil
 		default:
 			t.Fatalf("unexpected query: %s", query)
 			return nil, nil
@@ -129,7 +139,7 @@ func TestClient_UpsertUserBook_UpdatesWhenPresent(t *testing.T) {
 		t.Fatalf("UpsertUserBook() error = %v", err)
 	}
 	if !updateCalled {
-		t.Error("expected update_user_book_by_pk to be called when a row already exists")
+		t.Error("expected update_user_book to be called when a row already exists")
 	}
 }
 
@@ -445,7 +455,7 @@ func TestClient_SearchBooks_Table(t *testing.T) {
 // TestClient_do_NonGraphQLErrorStatusWithNilOut reproduces the real
 // Hardcover auth-failure shape ({"error": "..."} — no "errors" array, HTTP
 // 401) via a call path where out == nil, exactly matching how UpsertUserBook
-// invokes do() for insert_user_book and update_user_book_by_pk. Before the
+// invokes do() for insert_user_book and update_user_book. Before the
 // do() status-code fix this returned nil (a silent success): do() only
 // detected failure via a populated GraphQL "errors" array or a failed
 // unmarshal into out, and it skips the unmarshal entirely when out is nil,

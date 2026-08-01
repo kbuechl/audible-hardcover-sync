@@ -253,6 +253,12 @@ func (c *Client) FetchCoverURLs(ctx context.Context, bookIDs []int64) (map[int64
 // book in the authenticated user's Hardcover library. It queries for an
 // existing user_books row first because insert_user_book errors on a
 // duplicate (book_id, user_id) pair rather than upserting.
+//
+// The two mutation shapes below (argument types and the update mutation's
+// name/args) were confirmed via live GraphQL introspection against
+// Hardcover's real API on 2026-08-01 — the API is documented as "beta" and
+// this project's original design could only infer likely shapes from Hasura
+// conventions, not verify them, which is exactly what caused this bug.
 func (c *Client) UpsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64) error {
 	userID, err := c.userIDCached(ctx)
 	if err != nil {
@@ -278,7 +284,7 @@ func (c *Client) UpsertUserBook(ctx context.Context, bookID int64, statusID int,
 	}
 
 	if len(existing.UserBooks) == 0 {
-		insertQuery := `mutation InsertUserBook($object: user_books_insert_input!) {
+		insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
 			insert_user_book(object: $object) { id }
 		}`
 		object := map[string]any{"book_id": bookID, "status_id": statusID}
@@ -292,14 +298,14 @@ func (c *Client) UpsertUserBook(ctx context.Context, bookID int64, statusID int,
 	}
 
 	row := existing.UserBooks[0]
-	updateQuery := `mutation UpdateUserBook($id: Int!, $set: user_books_set_input!) {
-		update_user_book_by_pk(pk_columns: {id: $id}, _set: $set) { id }
+	updateQuery := `mutation UpdateUserBook($id: Int!, $object: UserBookUpdateInput!) {
+		update_user_book(id: $id, object: $object) { id }
 	}`
-	set := map[string]any{"status_id": statusID}
+	object := map[string]any{"status_id": statusID}
 	if rating != nil {
-		set["rating"] = *rating
+		object["rating"] = *rating
 	}
-	if err := c.do(ctx, updateQuery, map[string]any{"id": row.ID, "set": set}, nil); err != nil {
+	if err := c.do(ctx, updateQuery, map[string]any{"id": row.ID, "object": object}, nil); err != nil {
 		return fmt.Errorf("update user_book %d: %w", row.ID, err)
 	}
 	return nil
