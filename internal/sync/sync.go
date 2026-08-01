@@ -59,8 +59,9 @@ type Result struct {
 
 // Run performs one sync pass: for each Audible library item, it computes
 // the desired Hardcover status, diffs it against stored state, resolves a
-// Hardcover book ID (ISBN-exact match only, or reuse of a previously
-// resolved ID), upserts the Hardcover reading status, and persists the new
+// Hardcover book ID (reuse of a previously resolved cached ID, ISBN-exact
+// match, or a confidence-scored fuzzy fallback when ISBN matching produces
+// nothing), upserts the Hardcover reading status, and persists the new
 // state. Items that cannot be matched are marked unmatched and, if not
 // already notified, batched into a single notification at the end of the
 // pass. A per-book failure increments Result.Errored and is logged, but

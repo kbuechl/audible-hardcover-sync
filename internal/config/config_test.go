@@ -146,6 +146,62 @@ func TestLoad(t *testing.T) {
 				MatchConfidence:   0.82,
 			},
 		},
+		{
+			name: "match confidence: zero is valid",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "0"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.0,
+			},
+		},
+		{
+			name: "match confidence: 100 percent is valid",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "100%"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   1.0,
+			},
+		},
+		{
+			name: "match confidence: 1.0 fraction is valid",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "1.0"},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   1.0,
+			},
+		},
+		{
+			name: "match confidence: whitespace-only falls back to default",
+			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "  "},
+			want: Config{
+				HardcoverAPIToken: "test-token",
+				SyncInterval:      6 * time.Hour,
+				StateDBPath:       "/data/state.db",
+				CredentialsPath:   "/data/credentials.json",
+				WebUIPort:         "8080",
+				PublicURL:         "",
+				NotifyURLs:        nil,
+				MatchConfidence:   0.95,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,5 +277,14 @@ func TestLoad_MatchConfidenceOutOfRange(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want error for MATCH_CONFIDENCE out of range")
+	}
+}
+
+func TestLoad_MatchConfidenceNegative(t *testing.T) {
+	t.Setenv("HARDCOVER_API_TOKEN", "test-token")
+	t.Setenv("MATCH_CONFIDENCE", "-0.5") // negative, out of [0,1]
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for negative MATCH_CONFIDENCE")
 	}
 }

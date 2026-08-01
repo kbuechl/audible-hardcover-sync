@@ -108,6 +108,21 @@ func TestBestMatch(t *testing.T) {
 			wantMinScore: 0,
 			wantMaxScore: 0.5,
 		},
+		{
+			// Single candidate with a very wrong author must NOT receive the
+			// +0.15 confidence bonus — that bonus is gated on authorSim >= 0.9.
+			// Title is exact (titleSim ~1.0), author is unrelated (authorSim
+			// well below 0.9), so score ~ 0.7*1.0 + 0.3*~0 = ~0.7, and the
+			// bonus must not push it above ~0.85.
+			name:         "single candidate with mismatched author does not get bonus",
+			sourceTitle:  "Dune",
+			sourceAuthor: "Frank Herbert",
+			candidates:   []CandidateInfo{{Title: "Dune", Author: "F. Scott Fitzgerald"}},
+			wantOK:       true,
+			wantIndex:    0,
+			wantMinScore: 0.6,
+			wantMaxScore: 0.9, // 0.86 observed; strictly below the 1.0 a +0.15 bonus would produce
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

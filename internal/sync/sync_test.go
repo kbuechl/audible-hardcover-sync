@@ -99,6 +99,7 @@ func TestRun(t *testing.T) {
 		items           []audible.LibraryItem
 		byISBN          map[string]int64
 		searchResults   map[string][]hardcover.SearchResult
+		searchErr       error
 		matchConfidence float64
 		upsertErr       error
 		seed            *state.BookState
@@ -330,6 +331,26 @@ func TestRun(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "fuzzy search api failure is a per-book error not a run abort",
+			items: []audible.LibraryItem{
+				{ASIN: "A12", Title: "Dune", Author: "Frank Herbert", IsFinished: true, PercentComplete: 100},
+			},
+			// no ISBN — forces the fuzzy fallback path, where the search
+			// itself fails. This must be a per-book error (Errored++), not
+			// a fatal run abort, matching how ISBN-search failures are
+			// already treated.
+			searchErr:       errors.New("search down"),
+			matchConfidence: 0.75,
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Errored != 1 {
+					t.Errorf("Errored = %d, want 1", result.Errored)
+				}
+				if len(fh.upserted) != 0 {
+					t.Errorf("expected no upsert on search failure, got %v", fh.upserted)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -343,6 +364,7 @@ func TestRun(t *testing.T) {
 				fh.searchResults[query] = results
 			}
 			fh.upsertErr = tt.upsertErr
+		fh.searchErr = tt.searchErr
 			store := newTestStore(t)
 			if tt.seed != nil {
 				if err := store.Upsert(*tt.seed); err != nil {
