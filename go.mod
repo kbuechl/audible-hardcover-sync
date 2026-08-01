@@ -5,6 +5,7 @@ go 1.25.4
 replace github.com/mstrhakr/go-audible => ./third_party/go-audible
 
 require (
+	github.com/adrg/strutil v0.3.1
 	github.com/containrrr/shoutrrr v0.8.0
 	github.com/mstrhakr/go-audible v0.2.7
 	github.com/robfig/cron/v3 v3.0.1
