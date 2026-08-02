@@ -229,7 +229,16 @@ func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior 
 			return BookResolution{}, err
 		}
 		if found {
-			return BookResolution{BookID: match.BookID, EditionID: match.EditionID}, nil
+			// Always prefer the audiobook edition, even for ISBN-matched
+			// books — the ISBN may have matched a print edition, but
+			// since this is an Audible audiobook sync, the audio edition
+			// is the one the user actually consumed. Falls back to text
+			// if no audio edition exists.
+			editionID, _ := d.Hardcover.FindAudioEdition(ctx, match.BookID, item.ASIN)
+			if editionID == nil {
+				editionID = match.EditionID // use the ISBN-matched edition as fallback
+			}
+			return BookResolution{BookID: match.BookID, EditionID: editionID}, nil
 		}
 	}
 

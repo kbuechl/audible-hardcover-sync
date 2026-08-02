@@ -226,32 +226,35 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMat
 	return BookMatch{BookID: out.Editions[0].BookID, EditionID: &edID}, true, nil
 }
 
-// FindAudioEdition finds the audiobook edition for a given book_id,
-// preferring an ASIN match (the exact Audible edition) and falling back
-// to any edition with audio_seconds set. Returns nil if no audio edition
-// is found — the caller should then leave edition_id unset and let
-// Hardcover default.
+// FindAudioEdition finds the best edition for a given book_id, preferring
+// the audiobook edition and falling back to a text edition when no audio
+// edition exists. Preference order:
+//  1. ASIN match (the exact Audible edition)
+//  2. Any edition with audio_seconds set (strong audiobook signal)
+//  3. Any edition at all (text fallback — better than letting Hardcover
+//     default to an arbitrary edition)
+// Returns nil only if the book has no editions at all.
 func (c *Client) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
 	var out struct {
 		Editions []struct {
 			ID int64 `json:"id"`
 		} `json:"editions"`
 	}
-	// Try ASIN match first — most accurate (the exact Audible edition).
-	query := `query FindAudioEditionByASIN($bookID: Int!, $asin: String!) {
+	// 1. Try ASIN match first — most accurate (the exact Audible edition).
+	query := `query FindEditionByASIN($bookID: Int!, $asin: String!) {
 		editions(where: {book_id: {_eq: $bookID}, asin: {_eq: $asin}}, limit: 1) {
 			id
 		}
 	}`
 	if err := c.do(ctx, query, map[string]any{"bookID": bookID, "asin": asin}, &out); err != nil {
-		return nil, fmt.Errorf("find audio edition by asin: %w", err)
+		return nil, fmt.Errorf("find edition by asin: %w", err)
 	}
 	if len(out.Editions) > 0 {
 		edID := out.Editions[0].ID
 		return &edID, nil
 	}
 
-	// Fallback: any edition with audio_seconds (a strong audiobook signal).
+	// 2. Fallback: any edition with audio_seconds (a strong audiobook signal).
 	var out2 struct {
 		Editions []struct {
 			ID int64 `json:"id"`
@@ -267,6 +270,26 @@ func (c *Client) FindAudioEdition(ctx context.Context, bookID int64, asin string
 	}
 	if len(out2.Editions) > 0 {
 		edID := out2.Editions[0].ID
+		return &edID, nil
+	}
+
+	// 3. Text fallback: any edition at all. Better to pick a specific
+	// edition than let Hardcover default to an arbitrary one.
+	var out3 struct {
+		Editions []struct {
+			ID int64 `json:"id"`
+		} `json:"editions"`
+	}
+	query3 := `query FindAnyEdition($bookID: Int!) {
+		editions(where: {book_id: {_eq: $bookID}}, limit: 1) {
+			id
+		}
+	}`
+	if err := c.do(ctx, query3, map[string]any{"bookID": bookID}, &out3); err != nil {
+		return nil, fmt.Errorf("find any edition: %w", err)
+	}
+	if len(out3.Editions) > 0 {
+		edID := out3.Editions[0].ID
 		return &edID, nil
 	}
 	return nil, nil
