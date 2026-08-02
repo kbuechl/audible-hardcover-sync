@@ -189,27 +189,87 @@ func (c *Client) userIDCached(ctx context.Context) (int64, error) {
 	return id, nil
 }
 
-// FindBookByISBN resolves a Hardcover book_id from an exact ISBN-10 or
-// ISBN-13 match against the editions table (not the fuzzy search endpoint —
-// this is the deterministic path used by the automated sync).
-func (c *Client) FindBookByISBN(ctx context.Context, isbn string) (bookID int64, found bool, err error) {
+// BookMatch holds the result of a book lookup: the book_id (always set
+// when found) and the edition_id (set when the match was via an edition
+// lookup — ISBN or ASIN — not when matched via fuzzy search).
+type BookMatch struct {
+	BookID     int64
+	EditionID  *int64 // nil if no specific edition was identified
+}
+
+// FindBookByISBN resolves a Hardcover book_id from an exact ISBN-10,
+// ISBN-13, or Audible ASIN match against the editions table (not the
+// fuzzy search endpoint — this is the deterministic path used by the
+// automated sync). When matched, the edition_id is also returned so the
+// caller can set it on the user_books row and track the specific edition
+// (e.g. the audiobook edition) rather than letting Hardcover default.
+func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMatch, bool, error) {
 	var out struct {
 		Editions []struct {
+			ID     int64 `json:"id"`
 			BookID int64 `json:"book_id"`
 		} `json:"editions"`
 	}
-	query := `query FindByISBN($isbn: String!) {
-		editions(where: {_or: [{isbn_13: {_eq: $isbn}}, {isbn_10: {_eq: $isbn}}]}, limit: 1) {
+	query := `query FindByISBNOrASIN($isbn: String!, $asin: String!) {
+		editions(where: {_or: [{isbn_13: {_eq: $isbn}}, {isbn_10: {_eq: $isbn}}, {asin: {_eq: $asin}}]}, limit: 1) {
+			id
 			book_id
 		}
 	}`
-	if err := c.do(ctx, query, map[string]any{"isbn": isbn}, &out); err != nil {
-		return 0, false, err
+	if err := c.do(ctx, query, map[string]any{"isbn": isbn, "asin": asin}, &out); err != nil {
+		return BookMatch{}, false, err
 	}
 	if len(out.Editions) == 0 {
-		return 0, false, nil
+		return BookMatch{}, false, nil
 	}
-	return out.Editions[0].BookID, true, nil
+	edID := out.Editions[0].ID
+	return BookMatch{BookID: out.Editions[0].BookID, EditionID: &edID}, true, nil
+}
+
+// FindAudioEdition finds the audiobook edition for a given book_id,
+// preferring an ASIN match (the exact Audible edition) and falling back
+// to any edition with audio_seconds set. Returns nil if no audio edition
+// is found — the caller should then leave edition_id unset and let
+// Hardcover default.
+func (c *Client) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
+	var out struct {
+		Editions []struct {
+			ID int64 `json:"id"`
+		} `json:"editions"`
+	}
+	// Try ASIN match first — most accurate (the exact Audible edition).
+	query := `query FindAudioEditionByASIN($bookID: Int!, $asin: String!) {
+		editions(where: {book_id: {_eq: $bookID}, asin: {_eq: $asin}}, limit: 1) {
+			id
+		}
+	}`
+	if err := c.do(ctx, query, map[string]any{"bookID": bookID, "asin": asin}, &out); err != nil {
+		return nil, fmt.Errorf("find audio edition by asin: %w", err)
+	}
+	if len(out.Editions) > 0 {
+		edID := out.Editions[0].ID
+		return &edID, nil
+	}
+
+	// Fallback: any edition with audio_seconds (a strong audiobook signal).
+	var out2 struct {
+		Editions []struct {
+			ID int64 `json:"id"`
+		} `json:"editions"`
+	}
+	query2 := `query FindAudioEditionByDuration($bookID: Int!) {
+		editions(where: {book_id: {_eq: $bookID}, audio_seconds: {_is_null: false}}, limit: 1) {
+			id
+		}
+	}`
+	if err := c.do(ctx, query2, map[string]any{"bookID": bookID}, &out2); err != nil {
+		return nil, fmt.Errorf("find audio edition by duration: %w", err)
+	}
+	if len(out2.Editions) > 0 {
+		edID := out2.Editions[0].ID
+		return &edID, nil
+	}
+	return nil, nil
 }
 
 type SearchResult struct {
@@ -372,7 +432,7 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 //
 // The mutation shape (argument types) was confirmed via live GraphQL
 // introspection against Hardcover's real API on 2026-08-01.
-func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64, userDate *time.Time) error {
+func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
 	insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
 		insert_user_book(object: $object) { id }
 	}`
@@ -382,6 +442,9 @@ func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int,
 	}
 	if userDate != nil {
 		object["user_date"] = userDate.Format("2006-01-02")
+	}
+	if editionID != nil {
+		object["edition_id"] = *editionID
 	}
 	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, nil); err != nil {
 		return fmt.Errorf("insert user_book: %w", err)
@@ -402,7 +465,7 @@ func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int,
 // The mutation shape (argument types and the update mutation's name/args)
 // was confirmed via live GraphQL introspection against Hardcover's real
 // API on 2026-08-01.
-func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64, userDate *time.Time) error {
+func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
 	updateQuery := `mutation UpdateUserBook($id: Int!, $object: UserBookUpdateInput!) {
 		update_user_book(id: $id, object: $object) { id }
 	}`
@@ -412,6 +475,9 @@ func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, 
 	}
 	if userDate != nil {
 		object["user_date"] = userDate.Format("2006-01-02")
+	}
+	if editionID != nil {
+		object["edition_id"] = *editionID
 	}
 	if err := c.do(ctx, updateQuery, map[string]any{"id": rowID, "object": object}, nil); err != nil {
 		return fmt.Errorf("update user_book %d: %w", rowID, err)

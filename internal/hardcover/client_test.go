@@ -64,12 +64,12 @@ func TestClient_FindBookByISBN_Found(t *testing.T) {
 		return map[string]any{"editions": []map[string]any{{"book_id": 777}}}, nil
 	})
 
-	id, found, err := c.FindBookByISBN(context.Background(), "9780641723445")
+	match, found, err := c.FindBookByISBN(context.Background(), "9780641723445", "")
 	if err != nil {
 		t.Fatalf("FindBookByISBN() error = %v", err)
 	}
-	if !found || id != 777 {
-		t.Errorf("FindBookByISBN() = (%d, %v), want (777, true)", id, found)
+	if !found || match.BookID != 777 {
+		t.Errorf("FindBookByISBN() = (%+v, %v), want BookID 777", match, found)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestClient_FindBookByISBN_NotFound(t *testing.T) {
 		return map[string]any{"editions": []map[string]any{}}, nil
 	})
 
-	_, found, err := c.FindBookByISBN(context.Background(), "0000000000")
+	_, found, err := c.FindBookByISBN(context.Background(), "0000000000", "")
 	if err != nil {
 		t.Fatalf("FindBookByISBN() error = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestClient_InsertUserBook(t *testing.T) {
 		}
 	})
 
-	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil); err != nil {
+	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if !insertCalled {
@@ -180,7 +180,7 @@ func TestClient_UpdateUserBook(t *testing.T) {
 		}
 	})
 
-	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, nil); err != nil {
+	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateUserBook() error = %v", err)
 	}
 	if !updateCalled {
@@ -253,7 +253,7 @@ func TestClient_FindBookByISBN_Error(t *testing.T) {
 		return nil, errors.New("editions query failed")
 	})
 
-	_, found, err := c.FindBookByISBN(context.Background(), "9780641723445")
+	_, found, err := c.FindBookByISBN(context.Background(), "9780641723445", "")
 	if err == nil {
 		t.Fatal("FindBookByISBN() error = nil, want error")
 	}
@@ -276,7 +276,7 @@ func TestClient_InsertUserBook_WithUserDate(t *testing.T) {
 	})
 
 	finishedAt := time.Date(2025, 10, 11, 19, 34, 29, 0, time.UTC)
-	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, &finishedAt); err != nil {
+	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, &finishedAt, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if got := capturedObject["user_date"]; got != "2025-10-11" {
@@ -295,7 +295,7 @@ func TestClient_InsertUserBook_WithoutUserDate(t *testing.T) {
 		return nil, nil
 	})
 
-	if err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil); err != nil {
+	if err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if _, hasDate := capturedObject["user_date"]; hasDate {
@@ -315,7 +315,7 @@ func TestClient_UpdateUserBook_WithUserDate(t *testing.T) {
 	})
 
 	finishedAt := time.Date(2025, 10, 11, 19, 34, 29, 0, time.UTC)
-	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, &finishedAt); err != nil {
+	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, &finishedAt, nil); err != nil {
 		t.Fatalf("UpdateUserBook() error = %v", err)
 	}
 	if got := capturedObject["user_date"]; got != "2025-10-11" {
@@ -769,7 +769,7 @@ func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 	c.endpoint = srv.URL
 	c.httpClient = rc.StandardClient()
 
-	err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil)
+	err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil)
 	if err == nil {
 		t.Fatal("InsertUserBook() error = nil, want error for 429 on mutation")
 	}

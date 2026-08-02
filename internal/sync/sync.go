@@ -22,11 +22,12 @@ type AudibleClient interface {
 // HardcoverClient is the subset of the hardcover package's client needed to
 // run a sync pass, narrowed so this package can be tested against a fake.
 type HardcoverClient interface {
-	FindBookByISBN(ctx context.Context, isbn string) (int64, bool, error)
+	FindBookByISBN(ctx context.Context, isbn, asin string) (hardcover.BookMatch, bool, error)
+	FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error)
 	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
 	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
-	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64, userDate *time.Time) error
-	UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64, userDate *time.Time) error
+	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error
+	UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -110,78 +111,73 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
-		bookID, resolvedErr := resolveBookID(ctx, d, item, prior)
-		if resolvedErr != nil {
-			slog.Error("resolve hardcover book id", "asin", item.ASIN, "error", resolvedErr)
+resolved, resolvedErr := resolveBookID(ctx, d, item, prior)
+	if resolvedErr != nil {
+		slog.Error("resolve hardcover book id", "asin", item.ASIN, "error", resolvedErr)
+		result.Errored++
+		continue
+	}
+	if resolved.BookID == 0 {
+		bs := state.BookState{
+			ASIN:              item.ASIN,
+			Title:             item.Title,
+			Author:            item.Author,
+			Status:            status,
+			PercentComplete:   item.PercentComplete,
+			Unmatched:         true,
+			NotifiedUnmatched: prior != nil && prior.NotifiedUnmatched,
+		}
+		if err := d.Store.Upsert(bs); err != nil {
+			slog.Error("persist unmatched state", "asin", item.ASIN, "error", err)
 			result.Errored++
 			continue
 		}
-		if bookID == 0 {
-			bs := state.BookState{
-				ASIN:              item.ASIN,
-				Title:             item.Title,
-				Author:            item.Author,
-				Status:            status,
-				PercentComplete:   item.PercentComplete,
-				Unmatched:         true,
-				NotifiedUnmatched: prior != nil && prior.NotifiedUnmatched,
-			}
-			if err := d.Store.Upsert(bs); err != nil {
-				slog.Error("persist unmatched state", "asin", item.ASIN, "error", err)
-				result.Errored++
-				continue
-			}
-			result.Unmatched++
-			if !bs.NotifiedUnmatched {
-				newlyUnmatched = append(newlyUnmatched, bs)
-			}
-			continue
+		result.Unmatched++
+		if !bs.NotifiedUnmatched {
+			newlyUnmatched = append(newlyUnmatched, bs)
 		}
+		continue
+	}
 
-		// userDate is the finished-listening date from Audible, passed to
-		// Hardcover as user_date (the "end date" in the reading log).
-		// Only set for finished books — in-progress books have no end date.
-		var userDate *time.Time
-		if status == state.StatusFinished {
-			userDate = item.FinishedAt
-		}
+	bookID := resolved.BookID
 
-		// Check the in-memory cache of the user's Hardcover library:
-		// if the book is already there with a status >= the new status,
-		// skip the API call entirely — never downgrade a status that
-		// was set via another source (print read, manual, etc.), and
-		// never make a redundant API call for an already-correct status.
-		if existing, hasExisting := userBooks[bookID]; hasExisting {
-			if existing.StatusID >= statusID {
-				result.Unchanged++
-				continue
-			}
-			// Upgrade: existing status is lower, update it.
-			if err := d.Hardcover.UpdateUserBook(ctx, existing.ID, statusID, nil, userDate); err != nil {
-				slog.Error("update hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
-				result.Errored++
-				continue
-			}
-		} else {
-			// New book — insert it.
-			if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, nil, userDate); err != nil {
-				slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
-				result.Errored++
-				continue
-			}
-		}
+	// If the book is already in the user's Hardcover library (any
+	// status), skip it entirely — never modify an existing entry. This
+	// means a book read in print and marked Read on Hardcover won't be
+	// downgraded when the audiobook is in-progress on Audible, a
+	// manually-set rating won't be overwritten, and a manually-set
+	// finish date won't be clobbered. The sync only INSERTS new books.
+	if _, hasExisting := userBooks[bookID]; hasExisting {
+		result.Unchanged++
+		continue
+	}
 
-		if err := d.Store.Upsert(state.BookState{
-			ASIN:            item.ASIN,
-			Status:          status,
-			PercentComplete: item.PercentComplete,
-			HardcoverBookID: &bookID,
-		}); err != nil {
-			slog.Error("persist synced state", "asin", item.ASIN, "error", err)
-			result.Errored++
-			continue
-		}
-		result.Synced++
+	// userDate is the finished-listening date from Audible, passed to
+	// Hardcover as user_date (the "end date" in the reading log).
+	// Only set for finished books — in-progress books have no end date.
+	var userDate *time.Time
+	if status == state.StatusFinished {
+		userDate = item.FinishedAt
+	}
+
+	// New book — insert it with status, edition, date, and rating.
+	if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID); err != nil {
+		slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
+		result.Errored++
+		continue
+	}
+
+	if err := d.Store.Upsert(state.BookState{
+		ASIN:            item.ASIN,
+		Status:          status,
+		PercentComplete: item.PercentComplete,
+		HardcoverBookID: &bookID,
+	}); err != nil {
+		slog.Error("persist synced state", "asin", item.ASIN, "error", err)
+		result.Errored++
+		continue
+	}
+	result.Synced++
 	}
 
 	if len(newlyUnmatched) > 0 {
@@ -210,21 +206,30 @@ func desiredStatus(item audible.LibraryItem) (status state.Status, statusID int,
 	}
 }
 
-// resolveBookID returns 0 (with no error) when the item cannot be matched
-// and should be routed to the unmatched flow — never an error in that case.
-func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior *state.BookState) (int64, error) {
+// BookResolution holds the result of resolving an Audible item to a
+// Hardcover book: the book_id (always set when resolved) and optionally
+// the edition_id (set when an audiobook edition was identified).
+type BookResolution struct {
+	BookID    int64
+	EditionID *int64
+}
+
+// resolveBookID returns a zero BookResolution (with no error) when the
+// item cannot be matched and should be routed to the unmatched flow —
+// never an error in that case.
+func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior *state.BookState) (BookResolution, error) {
 	if prior != nil && prior.HardcoverBookID != nil {
-		return *prior.HardcoverBookID, nil
+		return BookResolution{BookID: *prior.HardcoverBookID}, nil
 	}
 
 	isbn, ok := matcher.BestISBN(matcher.AudibleItem{ASIN: item.ASIN, ISBN13: item.ISBN13, ISBN10: item.ISBN10})
 	if ok {
-		id, found, err := d.Hardcover.FindBookByISBN(ctx, isbn)
+		match, found, err := d.Hardcover.FindBookByISBN(ctx, isbn, item.ASIN)
 		if err != nil {
-			return 0, err
+			return BookResolution{}, err
 		}
 		if found {
-			return id, nil
+			return BookResolution{BookID: match.BookID, EditionID: match.EditionID}, nil
 		}
 	}
 
@@ -236,16 +241,18 @@ func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior 
 }
 
 // resolveByFuzzyMatch searches Hardcover by title and, if the best-scoring
-// candidate clears d.MatchConfidence, returns its book ID. Returns 0 (with
-// no error) whenever there's no confident match, routing the item to the
-// unmatched/manual-match flow exactly like a failed ISBN lookup.
-func resolveByFuzzyMatch(ctx context.Context, d Deps, item audible.LibraryItem) (int64, error) {
+// candidate clears d.MatchConfidence, returns its book ID. Returns a zero
+// BookResolution (with no error) whenever there's no confident match,
+// routing the item to the unmatched/manual-match flow exactly like a
+// failed ISBN lookup. When a book is matched, it also tries to find the
+// audiobook edition by ASIN (falling back to any edition with audio).
+func resolveByFuzzyMatch(ctx context.Context, d Deps, item audible.LibraryItem) (BookResolution, error) {
 	results, err := d.Hardcover.SearchBooks(ctx, item.Title, 10)
 	if err != nil {
-		return 0, err
+		return BookResolution{}, err
 	}
 	if len(results) == 0 {
-		return 0, nil
+		return BookResolution{}, nil
 	}
 
 	candidates := make([]matcher.CandidateInfo, len(results))
@@ -259,7 +266,11 @@ func resolveByFuzzyMatch(ctx context.Context, d Deps, item audible.LibraryItem) 
 
 	idx, score, ok := matcher.BestMatch(item.Title, item.Author, candidates)
 	if !ok || score < d.MatchConfidence {
-		return 0, nil
+		return BookResolution{}, nil
 	}
-	return results[idx].ID, nil
+
+	bookID := results[idx].ID
+	// Try to find the audiobook edition for this fuzzy-matched book.
+	editionID, _ := d.Hardcover.FindAudioEdition(ctx, bookID, item.ASIN)
+	return BookResolution{BookID: bookID, EditionID: editionID}, nil
 }

@@ -27,7 +27,7 @@ func (f *fakeAudible) FetchLibrary(ctx context.Context) ([]audible.LibraryItem, 
 
 type upsertCall struct {
 	statusID int
-	rating   *float64
+	rating   *int
 }
 
 type fakeHardcover struct {
@@ -50,9 +50,9 @@ func newFakeHardcover() *fakeHardcover {
 	}
 }
 
-func (f *fakeHardcover) FindBookByISBN(ctx context.Context, isbn string) (int64, bool, error) {
+func (f *fakeHardcover) FindBookByISBN(ctx context.Context, isbn, asin string) (hardcover.BookMatch, bool, error) {
 	id, ok := f.byISBN[isbn]
-	return id, ok, nil
+	return hardcover.BookMatch{BookID: id}, ok, nil
 }
 
 func (f *fakeHardcover) SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error) {
@@ -63,7 +63,6 @@ func (f *fakeHardcover) SearchBooks(ctx context.Context, query string, perPage i
 }
 
 func (f *fakeHardcover) FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error) {
-	// Return a copy so the test's seed map isn't mutated by the sync loop.
 	out := make(map[int64]hardcover.UserBook, len(f.userBooks))
 	for k, v := range f.userBooks {
 		out[k] = v
@@ -71,7 +70,11 @@ func (f *fakeHardcover) FetchUserBooks(ctx context.Context) (map[int64]hardcover
 	return out, nil
 }
 
-func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *float64, userDate *time.Time) error {
+func (f *fakeHardcover) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
+	return nil, nil // tests don't need edition resolution
+}
+
+func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
@@ -79,7 +82,7 @@ func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, status
 	return nil
 }
 
-func (f *fakeHardcover) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *float64, userDate *time.Time) error {
+func (f *fakeHardcover) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
@@ -375,29 +378,26 @@ if len(fh.inserted) != 0 {
 			},
 		},
 		{
-			name: "book currently reading on hardcover is upgraded to read",
+			name: "book currently reading on hardcover is skipped, not upgraded",
 			items: []audible.LibraryItem{
 				{ASIN: "A14", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
 			},
 			byISBN: map[string]int64{"9780641723445": 777},
 			// Book 777 is Currently Reading (2) on Hardcover. Audible
-			// says finished → Read (3). This is a legitimate upgrade.
+			// says finished → Read (3). The sync skips it entirely —
+			// existing entries are never modified, even for upgrades.
 			userBooks: map[int64]hardcover.UserBook{
 				777: {ID: 500, BookID: 777, StatusID: 2},
 			},
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
-				if result.Synced != 1 {
-					t.Errorf("Synced = %d, want 1 (upgrade from Currently Reading to Read)", result.Synced)
+				if result.Unchanged != 1 {
+					t.Errorf("Unchanged = %d, want 1 (existing book must be skipped)", result.Unchanged)
 				}
-				got, ok := fh.updated[500]
-				if !ok {
-					t.Fatalf("updated = %v, want an entry for row id 500", fh.updated)
-				}
-				if got.statusID != 3 {
-					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+				if len(fh.updated) != 0 {
+					t.Errorf("expected no update call for an existing book, got %v", fh.updated)
 				}
 				if len(fh.inserted) != 0 {
-					t.Errorf("expected no insert for an existing book, got %v", fh.inserted)
+					t.Errorf("expected no insert call for an existing book, got %v", fh.inserted)
 				}
 			},
 		},

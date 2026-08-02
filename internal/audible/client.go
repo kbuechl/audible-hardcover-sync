@@ -31,12 +31,16 @@ type LibraryItem struct {
 	// DateAdded is when the book was added to the user's Audible library,
 	// from library_status.date_added. Nil if absent/unparseable.
 	DateAdded *time.Time
+	// Rating is the user's personal star rating (1-5) from Audible's
+	// provided_review.ratings.overall_rating. Nil if the user hasn't
+	// rated the book on Audible.
+	Rating *int
 }
 
 // responseGroups extends the SDK's default set (WithResponseGroups replaces
 // rather than merges, so the defaults must be repeated here explicitly).
 var responseGroups = append(append([]string{}, audiblesdk.DefaultResponseGroups...),
-	"listening_status", "percent_complete", "is_finished")
+	"listening_status", "percent_complete", "is_finished", "provided_review")
 
 type Client struct {
 	sdk *audiblesdk.Client
@@ -123,6 +127,10 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 	if len(b.Authors) > 0 {
 		author = b.Authors[0].Name
 	}
+	var rating *int
+	if b.ProvidedReview != nil && b.ProvidedReview.Ratings != nil {
+		rating = b.ProvidedReview.Ratings.OverallRating
+	}
 	return LibraryItem{
 		ASIN:            b.ASIN,
 		Title:           b.Title,
@@ -133,6 +141,7 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 		PercentComplete: b.PercentComplete,
 		FinishedAt:      parseAudibleTimestamp(b.ListeningStatus.FinishedAtTimestamp),
 		DateAdded:       parseAudibleTimestamp(b.LibraryStatus.DateAdded),
+		Rating:          rating,
 	}
 }
 

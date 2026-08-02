@@ -64,21 +64,41 @@ type Book struct {
 	// response group, including when the book was added to the user's
 	// library.
 	LibraryStatus LibraryStatus `json:"library_status,omitempty"`
+	// ProvidedReview captures the user's personal review/rating from the
+	// "provided_review" response group. Populated only when that response
+	// group is requested AND the user has actually left a review/rating.
+	ProvidedReview *ProvidedReview `json:"provided_review,omitempty"`
 }
 
 // ListeningStatus holds listening progress data returned by the
 // "listening_status" response group.
 type ListeningStatus struct {
-	FinishedAtTimestamp   string `json:"finished_at_timestamp,omitempty"`
-	IsFinished            bool   `json:"is_finished"`
+	FinishedAtTimestamp   string  `json:"finished_at_timestamp,omitempty"`
+	IsFinished            bool    `json:"is_finished"`
 	PercentComplete       float64 `json:"percent_complete"`
-	TimeRemainingSeconds  int    `json:"time_remaining_seconds"`
+	TimeRemainingSeconds  int     `json:"time_remaining_seconds"`
 }
 
 // LibraryStatus holds library metadata returned alongside the
 // "listening_status" response group.
 type LibraryStatus struct {
 	DateAdded string `json:"date_added,omitempty"`
+}
+
+// ProvidedReview holds the user's personal review/rating from the
+// "provided_review" response group. Only populated when the user has
+// actually left a review or rating on Audible.
+type ProvidedReview struct {
+	Ratings *ReviewRatings `json:"ratings,omitempty"`
+}
+
+// ReviewRatings holds the user's star ratings (1-5) for a book.
+// Overall is always set when a review exists; Performance and Story
+// are optional and may be nil.
+type ReviewRatings struct {
+	OverallRating     *int `json:"overall_rating,omitempty"`
+	PerformanceRating *int `json:"performance_rating,omitempty"`
+	StoryRating       *int `json:"story_rating,omitempty"`
 }
 
 // BestID returns the most specific available identifier in priority order:
@@ -186,6 +206,7 @@ func (b *Book) UnmarshalJSON(data []byte) error {
 		IsAyce              bool           `json:"is_ayce"`
 		ListeningStatus     ListeningStatus `json:"listening_status,omitempty"`
 		LibraryStatus       LibraryStatus   `json:"library_status,omitempty"`
+		ProvidedReview      *ProvidedReview `json:"provided_review,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -216,6 +237,7 @@ func (b *Book) UnmarshalJSON(data []byte) error {
 	b.IsAyce = raw.IsAyce
 	b.ListeningStatus = raw.ListeningStatus
 	b.LibraryStatus = raw.LibraryStatus
+	b.ProvidedReview = raw.ProvidedReview
 
 	// Initialize identifier fields before classification.
 	b.ASIN, b.ISBN10, b.ISBN13, b.OtherID = "", "", "", ""
