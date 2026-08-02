@@ -61,7 +61,9 @@ func TestClient_Me(t *testing.T) {
 
 func TestClient_FindBookByISBN_Found(t *testing.T) {
 	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
-		return map[string]any{"editions": []map[string]any{{"book_id": 777}}}, nil
+		return map[string]any{"editions": []map[string]any{
+			{"book_id": 777, "book": map[string]any{"default_audio_edition_id": 999}},
+		}}, nil
 	})
 
 	match, found, err := c.FindBookByISBN(context.Background(), "9780641723445", "")
@@ -70,6 +72,34 @@ func TestClient_FindBookByISBN_Found(t *testing.T) {
 	}
 	if !found || match.BookID != 777 {
 		t.Errorf("FindBookByISBN() = (%+v, %v), want BookID 777", match, found)
+	}
+	if match.EditionID == nil || *match.EditionID != 999 {
+		t.Errorf("FindBookByISBN() EditionID = %v, want 999 (book.default_audio_edition_id)", match.EditionID)
+	}
+}
+
+func TestClient_FindBookByISBN_NoDefaultEdition(t *testing.T) {
+	// A matched book whose nested book object has no default editions set
+	// must yield a nil EditionID — the caller then falls back to no edition.
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		return map[string]any{"editions": []map[string]any{
+			{"book_id": 777, "book": map[string]any{
+				"default_audio_edition_id":    nil,
+				"default_ebook_edition_id":    nil,
+				"default_physical_edition_id": nil,
+			}},
+		}}, nil
+	})
+
+	match, found, err := c.FindBookByISBN(context.Background(), "9780641723445", "")
+	if err != nil {
+		t.Fatalf("FindBookByISBN() error = %v", err)
+	}
+	if !found || match.BookID != 777 {
+		t.Errorf("FindBookByISBN() = (%+v, %v), want BookID 777", match, found)
+	}
+	if match.EditionID != nil {
+		t.Errorf("FindBookByISBN() EditionID = %v, want nil when no default editions are set", match.EditionID)
 	}
 }
 
@@ -259,6 +289,66 @@ func TestClient_FindBookByISBN_Error(t *testing.T) {
 	}
 	if found {
 		t.Error("found = true, want false on error")
+	}
+}
+
+// TestClient_FindBookByISBN_EbookFallback verifies the edition-selection
+// fallback chain inside FindBookByISBN: when the book has no
+// default_audio_edition_id, default_ebook_edition_id is used instead.
+func TestClient_FindBookByISBN_EbookFallback(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		return map[string]any{"editions": []map[string]any{
+			{"book_id": 777, "book": map[string]any{
+				"default_audio_edition_id":    nil,
+				"default_ebook_edition_id":    555,
+				"default_physical_edition_id": 444,
+			}},
+		}}, nil
+	})
+
+	match, found, err := c.FindBookByISBN(context.Background(), "9780641723445", "")
+	if err != nil {
+		t.Fatalf("FindBookByISBN() error = %v", err)
+	}
+	if !found || match.BookID != 777 {
+		t.Errorf("FindBookByISBN() = (%+v, %v), want BookID 777", match, found)
+	}
+	if match.EditionID == nil || *match.EditionID != 555 {
+		t.Errorf("FindBookByISBN() EditionID = %v, want 555 (default_ebook_edition_id fallback)", match.EditionID)
+	}
+}
+
+// TestPickEditionID verifies pickEditionID's preference order directly:
+// audio → ebook → physical → nil.
+func TestPickEditionID(t *testing.T) {
+	audio := int64(1)
+	ebook := int64(2)
+	physical := int64(3)
+	tests := []struct {
+		name     string
+		audio    *int64
+		ebook    *int64
+		physical *int64
+		want     *int64
+	}{
+		{"prefers audio over ebook and physical", &audio, &ebook, &physical, &audio},
+		{"falls back to ebook when no audio", nil, &ebook, &physical, &ebook},
+		{"falls back to physical when only physical is set", nil, nil, &physical, &physical},
+		{"nil when no default editions set", nil, nil, nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pickEditionID(tt.audio, tt.ebook, tt.physical)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("pickEditionID() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil || *got != *tt.want {
+				t.Errorf("pickEditionID() = %v, want %d", got, *tt.want)
+			}
+		})
 	}
 }
 

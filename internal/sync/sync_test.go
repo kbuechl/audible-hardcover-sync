@@ -26,33 +26,46 @@ func (f *fakeAudible) FetchLibrary(ctx context.Context) ([]audible.LibraryItem, 
 }
 
 type upsertCall struct {
-	statusID int
-	rating   *int
+	statusID  int
+	rating    *int
+	userDate  *time.Time
+	editionID *int64
 }
 
 type fakeHardcover struct {
-	byISBN        map[string]int64
-	searchResults map[string][]hardcover.SearchResult
-	searchErr     error
-	userBooks     map[int64]hardcover.UserBook // pre-seeded cache for FetchUserBooks
-	inserted      map[int64]upsertCall         // bookID → call
-	updated       map[int64]upsertCall         // rowID → call
-	upsertErr     error
+	byISBN             map[string]int64
+	editionByISBN      map[string]int64 // ISBN → edition_id returned by FindBookByISBN
+	searchResults      map[string][]hardcover.SearchResult
+	audioEditionByBook map[int64]int64 // bookID → edition_id returned by FindAudioEdition
+	searchErr          error
+	userBooks          map[int64]hardcover.UserBook // pre-seeded cache for FetchUserBooks
+	inserted           map[int64]upsertCall         // bookID → call
+	updated            map[int64]upsertCall         // rowID → call
+	upsertErr          error
 }
 
 func newFakeHardcover() *fakeHardcover {
 	return &fakeHardcover{
-		byISBN:        map[string]int64{},
-		searchResults: map[string][]hardcover.SearchResult{},
-		userBooks:     map[int64]hardcover.UserBook{},
-		inserted:      map[int64]upsertCall{},
-		updated:       map[int64]upsertCall{},
+		byISBN:             map[string]int64{},
+		editionByISBN:      map[string]int64{},
+		searchResults:      map[string][]hardcover.SearchResult{},
+		audioEditionByBook: map[int64]int64{},
+		userBooks:          map[int64]hardcover.UserBook{},
+		inserted:           map[int64]upsertCall{},
+		updated:            map[int64]upsertCall{},
 	}
 }
 
 func (f *fakeHardcover) FindBookByISBN(ctx context.Context, isbn, asin string) (hardcover.BookMatch, bool, error) {
 	id, ok := f.byISBN[isbn]
-	return hardcover.BookMatch{BookID: id}, ok, nil
+	if !ok {
+		return hardcover.BookMatch{}, false, nil
+	}
+	var editionID *int64
+	if ed, ok := f.editionByISBN[isbn]; ok {
+		editionID = int64Ptr(ed)
+	}
+	return hardcover.BookMatch{BookID: id, EditionID: editionID}, true, nil
 }
 
 func (f *fakeHardcover) SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error) {
@@ -71,6 +84,9 @@ func (f *fakeHardcover) FetchUserBooks(ctx context.Context) (map[int64]hardcover
 }
 
 func (f *fakeHardcover) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
+	if ed, ok := f.audioEditionByBook[bookID]; ok {
+		return int64Ptr(ed), nil
+	}
 	return nil, nil // tests don't need edition resolution
 }
 
@@ -78,7 +94,7 @@ func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, status
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
-	f.inserted[bookID] = upsertCall{statusID, rating}
+	f.inserted[bookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
 	return nil
 }
 
@@ -86,7 +102,7 @@ func (f *fakeHardcover) UpdateUserBook(ctx context.Context, rowID int64, statusI
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
-	f.updated[rowID] = upsertCall{statusID, rating}
+	f.updated[rowID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
 	return nil
 }
 
@@ -111,6 +127,8 @@ func newTestStore(t *testing.T) *state.Store {
 
 func int64Ptr(v int64) *int64 { return &v }
 
+func intPtr(v int) *int { return &v }
+
 func ptrTime(s string) *time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
@@ -129,16 +147,18 @@ func ptrTime(s string) *time.Time {
 // Deps/running Run/checking the top-level error in every scenario.
 func TestRun(t *testing.T) {
 	tests := []struct {
-		name            string
-		items           []audible.LibraryItem
-		byISBN          map[string]int64
-		searchResults   map[string][]hardcover.SearchResult
-		searchErr       error
-		userBooks       map[int64]hardcover.UserBook // pre-seeded Hardcover library cache
-		matchConfidence float64
-		upsertErr       error
-		seed            *state.BookState
-		check           func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result)
+		name               string
+		items              []audible.LibraryItem
+		byISBN             map[string]int64
+		editionByISBN      map[string]int64 // ISBN → edition_id FindBookByISBN should return
+		searchResults      map[string][]hardcover.SearchResult
+		audioEditionByBook map[int64]int64 // bookID → edition_id FindAudioEdition should return
+		searchErr          error
+		userBooks          map[int64]hardcover.UserBook // pre-seeded Hardcover library cache
+		matchConfidence    float64
+		upsertErr          error
+		seed               *state.BookState
+		check              func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result)
 	}{
 		{
 			name: "finished book syncs as read",
@@ -146,22 +166,22 @@ func TestRun(t *testing.T) {
 				{ASIN: "A1", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
 			},
 			byISBN: map[string]int64{"9780641723445": 777},
-check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
-			if result.Synced != 1 {
-				t.Errorf("Synced = %d, want 1", result.Synced)
-			}
-			got := fh.inserted[777]
-			if got.statusID != 3 {
-				t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
-			}
-			bs, err := store.Get("A1")
-			if err != nil {
-				t.Fatalf("store.Get() error = %v", err)
-			}
-			if bs == nil || bs.Status != state.StatusFinished {
-				t.Errorf("stored state = %+v, want status finished", bs)
-			}
-		},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Errorf("Synced = %d, want 1", result.Synced)
+				}
+				got := fh.inserted[777]
+				if got.statusID != 3 {
+					t.Errorf("statusID = %d, want 3 (Read)", got.statusID)
+				}
+				bs, err := store.Get("A1")
+				if err != nil {
+					t.Fatalf("store.Get() error = %v", err)
+				}
+				if bs == nil || bs.Status != state.StatusFinished {
+					t.Errorf("stored state = %+v, want status finished", bs)
+				}
+			},
 		},
 		{
 			name: "in-progress book syncs as currently reading",
@@ -173,9 +193,9 @@ check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifie
 				if result.Synced != 1 {
 					t.Errorf("Synced = %d, want 1", result.Synced)
 				}
-if fh.inserted[777].statusID != 2 {
-				t.Errorf("statusID = %d, want 2 (Currently Reading)", fh.inserted[777].statusID)
-			}
+				if fh.inserted[777].statusID != 2 {
+					t.Errorf("statusID = %d, want 2 (Currently Reading)", fh.inserted[777].statusID)
+				}
 			},
 		},
 		{
@@ -184,9 +204,9 @@ if fh.inserted[777].statusID != 2 {
 				{ASIN: "A3", ISBN13: "9780641723445", IsFinished: false, PercentComplete: 0},
 			},
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
-if result.Synced != 0 || len(fh.inserted) != 0 {
-				t.Errorf("expected no sync for a not-started book, got Synced=%d inserted=%v", result.Synced, fh.inserted)
-			}
+				if result.Synced != 0 || len(fh.inserted) != 0 {
+					t.Errorf("expected no sync for a not-started book, got Synced=%d inserted=%v", result.Synced, fh.inserted)
+				}
 			},
 		},
 		{
@@ -200,9 +220,9 @@ if result.Synced != 0 || len(fh.inserted) != 0 {
 				if result.Unchanged != 1 {
 					t.Errorf("Unchanged = %d, want 1", result.Unchanged)
 				}
-if len(fh.inserted) != 0 {
-				t.Errorf("expected no Hardcover call for an unchanged book, got %v", fh.inserted)
-			}
+				if len(fh.inserted) != 0 {
+					t.Errorf("expected no Hardcover call for an unchanged book, got %v", fh.inserted)
+				}
 			},
 		},
 		{
@@ -432,12 +452,12 @@ if len(fh.inserted) != 0 {
 				if result.Synced != 1 {
 					t.Fatalf("Synced = %d, want 1", result.Synced)
 				}
-				// The insert should have been called — we can't directly
-				// verify the userDate was passed since the fake doesn't
-				// capture it, but the test verifies the call path works
-				// end-to-end with a non-nil FinishedAt.
-				if len(fh.inserted) != 1 {
-					t.Errorf("inserted = %v, want 1 insert", fh.inserted)
+				got, ok := fh.inserted[777]
+				if !ok {
+					t.Fatalf("inserted = %v, want an entry for book id 777", fh.inserted)
+				}
+				if got.userDate == nil {
+					t.Error("userDate = nil, want the FinishedAt timestamp passed to the insert")
 				}
 			},
 		},
@@ -451,8 +471,76 @@ if len(fh.inserted) != 0 {
 				if result.Synced != 1 {
 					t.Fatalf("Synced = %d, want 1", result.Synced)
 				}
-				if len(fh.inserted) != 1 {
-					t.Errorf("inserted = %v, want 1 insert", fh.inserted)
+				got, ok := fh.inserted[777]
+				if !ok {
+					t.Fatalf("inserted = %v, want an entry for book id 777", fh.inserted)
+				}
+				if got.userDate != nil {
+					t.Errorf("userDate = %v, want nil for an in-progress book", got.userDate)
+				}
+			},
+		},
+		{
+			name: "isbn-matched book passes default audio edition to insert",
+			items: []audible.LibraryItem{
+				{ASIN: "A18", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
+			},
+			byISBN:        map[string]int64{"9780641723445": 777},
+			editionByISBN: map[string]int64{"9780641723445": 999},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Fatalf("Synced = %d, want 1", result.Synced)
+				}
+				got, ok := fh.inserted[777]
+				if !ok {
+					t.Fatalf("inserted = %v, want an entry for book id 777", fh.inserted)
+				}
+				if got.editionID == nil || *got.editionID != 999 {
+					t.Errorf("editionID = %v, want 999 (FindBookByISBN's book.default_audio_edition_id)", got.editionID)
+				}
+			},
+		},
+		{
+			name: "fuzzy-matched book passes audio edition from FindAudioEdition to insert",
+			items: []audible.LibraryItem{
+				{ASIN: "A19", Title: "System Collapse", Author: "Martha Wells", IsFinished: true, PercentComplete: 100},
+			},
+			// no ISBN — forces the fuzzy fallback path, which resolves the
+			// edition via a separate FindAudioEdition call
+			searchResults: map[string][]hardcover.SearchResult{
+				"System Collapse": {{ID: 888, Title: "System Collapse", AuthorNames: []string{"Martha Wells"}}},
+			},
+			audioEditionByBook: map[int64]int64{888: 8889},
+			matchConfidence:    0.75,
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Fatalf("Synced = %d, want 1", result.Synced)
+				}
+				got, ok := fh.inserted[888]
+				if !ok {
+					t.Fatalf("inserted = %v, want an entry for book id 888", fh.inserted)
+				}
+				if got.editionID == nil || *got.editionID != 8889 {
+					t.Errorf("editionID = %v, want 8889 (from FindAudioEdition)", got.editionID)
+				}
+			},
+		},
+		{
+			name: "rated book passes rating to insert",
+			items: []audible.LibraryItem{
+				{ASIN: "A20", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100, Rating: intPtr(4)},
+			},
+			byISBN: map[string]int64{"9780641723445": 777},
+			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
+				if result.Synced != 1 {
+					t.Fatalf("Synced = %d, want 1", result.Synced)
+				}
+				got, ok := fh.inserted[777]
+				if !ok {
+					t.Fatalf("inserted = %v, want an entry for book id 777", fh.inserted)
+				}
+				if got.rating == nil || *got.rating != 4 {
+					t.Errorf("rating = %v, want 4", got.rating)
 				}
 			},
 		},
@@ -498,14 +586,20 @@ if len(fh.inserted) != 0 {
 			for isbn, id := range tt.byISBN {
 				fh.byISBN[isbn] = id
 			}
+			for isbn, ed := range tt.editionByISBN {
+				fh.editionByISBN[isbn] = ed
+			}
 			for query, results := range tt.searchResults {
 				fh.searchResults[query] = results
 			}
+			for bookID, ed := range tt.audioEditionByBook {
+				fh.audioEditionByBook[bookID] = ed
+			}
 			fh.upsertErr = tt.upsertErr
-		fh.searchErr = tt.searchErr
-		for bookID, ub := range tt.userBooks {
-			fh.userBooks[bookID] = ub
-		}
+			fh.searchErr = tt.searchErr
+			for bookID, ub := range tt.userBooks {
+				fh.userBooks[bookID] = ub
+			}
 			store := newTestStore(t)
 			if tt.seed != nil {
 				if err := store.Upsert(*tt.seed); err != nil {

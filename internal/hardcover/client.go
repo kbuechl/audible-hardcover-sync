@@ -190,30 +190,40 @@ func (c *Client) userIDCached(ctx context.Context) (int64, error) {
 }
 
 // BookMatch holds the result of a book lookup: the book_id (always set
-// when found) and the edition_id (set when the match was via an edition
-// lookup — ISBN or ASIN — not when matched via fuzzy search).
+// when found) and the edition_id (set when an edition was identified —
+// preferred as the audiobook edition, falling back to ebook, then
+// physical, then any edition).
 type BookMatch struct {
-	BookID     int64
-	EditionID  *int64 // nil if no specific edition was identified
+	BookID    int64
+	EditionID *int64
 }
 
-// FindBookByISBN resolves a Hardcover book_id from an exact ISBN-10,
-// ISBN-13, or Audible ASIN match against the editions table (not the
-// fuzzy search endpoint — this is the deterministic path used by the
-// automated sync). When matched, the edition_id is also returned so the
-// caller can set it on the user_books row and track the specific edition
-// (e.g. the audiobook edition) rather than letting Hardcover default.
+// FindBookByISBN resolves a Hardcover book_id and the best edition_id
+// from an exact ISBN-10, ISBN-13, or Audible ASIN match against the
+// editions table. The edition_id is selected from the book's
+// default_audio_edition_id (Hardcover's own curated audio edition),
+// falling back to default_ebook_edition_id, then
+// default_physical_edition_id. This is a single GraphQL round trip —
+// the book lookup and edition selection happen in one query.
 func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMatch, bool, error) {
 	var out struct {
 		Editions []struct {
-			ID     int64 `json:"id"`
 			BookID int64 `json:"book_id"`
+			Book   struct {
+				DefaultAudioEditionID     *int64 `json:"default_audio_edition_id"`
+				DefaultEbookEditionID     *int64 `json:"default_ebook_edition_id"`
+				DefaultPhysicalEditionID  *int64 `json:"default_physical_edition_id"`
+			} `json:"book"`
 		} `json:"editions"`
 	}
 	query := `query FindByISBNOrASIN($isbn: String!, $asin: String!) {
 		editions(where: {_or: [{isbn_13: {_eq: $isbn}}, {isbn_10: {_eq: $isbn}}, {asin: {_eq: $asin}}]}, limit: 1) {
-			id
 			book_id
+			book {
+				default_audio_edition_id
+				default_ebook_edition_id
+				default_physical_edition_id
+			}
 		}
 	}`
 	if err := c.do(ctx, query, map[string]any{"isbn": isbn, "asin": asin}, &out); err != nil {
@@ -222,77 +232,52 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMat
 	if len(out.Editions) == 0 {
 		return BookMatch{}, false, nil
 	}
-	edID := out.Editions[0].ID
-	return BookMatch{BookID: out.Editions[0].BookID, EditionID: &edID}, true, nil
+	ed := pickEditionID(out.Editions[0].Book.DefaultAudioEditionID, out.Editions[0].Book.DefaultEbookEditionID, out.Editions[0].Book.DefaultPhysicalEditionID)
+	return BookMatch{BookID: out.Editions[0].BookID, EditionID: ed}, true, nil
 }
 
-// FindAudioEdition finds the best edition for a given book_id, preferring
-// the audiobook edition and falling back to a text edition when no audio
-// edition exists. Preference order:
-//  1. ASIN match (the exact Audible edition)
-//  2. Any edition with audio_seconds set (strong audiobook signal)
-//  3. Any edition at all (text fallback — better than letting Hardcover
-//     default to an arbitrary edition)
-// Returns nil only if the book has no editions at all.
+// FindAudioEdition finds the best edition for a given book_id, using
+// Hardcover's own curated default edition fields. Preference order:
+// audio → ebook → physical. This is a single GraphQL round trip.
+// Returns nil if the book has no default editions set.
 func (c *Client) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
 	var out struct {
-		Editions []struct {
-			ID int64 `json:"id"`
-		} `json:"editions"`
+		Books []struct {
+			DefaultAudioEditionID    *int64 `json:"default_audio_edition_id"`
+			DefaultEbookEditionID    *int64 `json:"default_ebook_edition_id"`
+			DefaultPhysicalEditionID *int64 `json:"default_physical_edition_id"`
+		} `json:"books"`
 	}
-	// 1. Try ASIN match first — most accurate (the exact Audible edition).
-	query := `query FindEditionByASIN($bookID: Int!, $asin: String!) {
-		editions(where: {book_id: {_eq: $bookID}, asin: {_eq: $asin}}, limit: 1) {
-			id
+	query := `query FindDefaultEditions($bookID: Int!) {
+		books(where: {id: {_eq: $bookID}}, limit: 1) {
+			default_audio_edition_id
+			default_ebook_edition_id
+			default_physical_edition_id
 		}
 	}`
-	if err := c.do(ctx, query, map[string]any{"bookID": bookID, "asin": asin}, &out); err != nil {
-		return nil, fmt.Errorf("find edition by asin: %w", err)
+	if err := c.do(ctx, query, map[string]any{"bookID": bookID}, &out); err != nil {
+		return nil, fmt.Errorf("find default editions: %w", err)
 	}
-	if len(out.Editions) > 0 {
-		edID := out.Editions[0].ID
-		return &edID, nil
+	if len(out.Books) == 0 {
+		return nil, nil
 	}
+	return pickEditionID(out.Books[0].DefaultAudioEditionID, out.Books[0].DefaultEbookEditionID, out.Books[0].DefaultPhysicalEditionID), nil
+}
 
-	// 2. Fallback: any edition with audio_seconds (a strong audiobook signal).
-	var out2 struct {
-		Editions []struct {
-			ID int64 `json:"id"`
-		} `json:"editions"`
+// pickEditionID selects the best edition_id from Hardcover's curated
+// defaults: audio first (this is an audiobook sync), then ebook, then
+// physical. Returns nil if none are set.
+func pickEditionID(audio, ebook, physical *int64) *int64 {
+	if audio != nil {
+		return audio
 	}
-	query2 := `query FindAudioEditionByDuration($bookID: Int!) {
-		editions(where: {book_id: {_eq: $bookID}, audio_seconds: {_is_null: false}}, limit: 1) {
-			id
-		}
-	}`
-	if err := c.do(ctx, query2, map[string]any{"bookID": bookID}, &out2); err != nil {
-		return nil, fmt.Errorf("find audio edition by duration: %w", err)
+	if ebook != nil {
+		return ebook
 	}
-	if len(out2.Editions) > 0 {
-		edID := out2.Editions[0].ID
-		return &edID, nil
+	if physical != nil {
+		return physical
 	}
-
-	// 3. Text fallback: any edition at all. Better to pick a specific
-	// edition than let Hardcover default to an arbitrary one.
-	var out3 struct {
-		Editions []struct {
-			ID int64 `json:"id"`
-		} `json:"editions"`
-	}
-	query3 := `query FindAnyEdition($bookID: Int!) {
-		editions(where: {book_id: {_eq: $bookID}}, limit: 1) {
-			id
-		}
-	}`
-	if err := c.do(ctx, query3, map[string]any{"bookID": bookID}, &out3); err != nil {
-		return nil, fmt.Errorf("find any edition: %w", err)
-	}
-	if len(out3.Editions) > 0 {
-		edID := out3.Editions[0].ID
-		return &edID, nil
-	}
-	return nil, nil
+	return nil
 }
 
 type SearchResult struct {
