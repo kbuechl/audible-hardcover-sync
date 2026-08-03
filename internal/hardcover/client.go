@@ -210,9 +210,9 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMat
 		Editions []struct {
 			BookID int64 `json:"book_id"`
 			Book   struct {
-				DefaultAudioEditionID     *int64 `json:"default_audio_edition_id"`
-				DefaultEbookEditionID     *int64 `json:"default_ebook_edition_id"`
-				DefaultPhysicalEditionID  *int64 `json:"default_physical_edition_id"`
+				DefaultAudioEditionID    *int64 `json:"default_audio_edition_id"`
+				DefaultEbookEditionID    *int64 `json:"default_ebook_edition_id"`
+				DefaultPhysicalEditionID *int64 `json:"default_physical_edition_id"`
 			} `json:"book"`
 		} `json:"editions"`
 	}
@@ -236,11 +236,11 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMat
 	return BookMatch{BookID: out.Editions[0].BookID, EditionID: ed}, true, nil
 }
 
-// FindAudioEdition finds the best edition for a given book_id, using
+// FindDefaultEdition finds the best edition for a given book_id, using
 // Hardcover's own curated default edition fields. Preference order:
 // audio → ebook → physical. This is a single GraphQL round trip.
 // Returns nil if the book has no default editions set.
-func (c *Client) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
+func (c *Client) FindDefaultEdition(ctx context.Context, bookID int64) (*int64, error) {
 	var out struct {
 		Books []struct {
 			DefaultAudioEditionID    *int64 `json:"default_audio_edition_id"`
@@ -376,13 +376,12 @@ func (c *Client) FetchCoverURLs(ctx context.Context, bookIDs []int64) (map[int64
 }
 
 // UserBook is a single entry in the user's Hardcover library, as
-// returned by FetchUserBooks. ID is the user_books row ID (needed for
-// updates); BookID is the books table ID (used as the cache key).
+// returned by FetchUserBooks. ID is the user_books row ID; BookID is the
+// books table ID (used as the cache key).
 type UserBook struct {
 	ID       int64
 	BookID   int64
 	StatusID int
-	Rating   *float64
 }
 
 // FetchUserBooks fetches all of the authenticated user's user_books rows
@@ -398,10 +397,9 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 
 	var out struct {
 		UserBooks []struct {
-			ID       int64        `json:"id"`
-			BookID   int64        `json:"book_id"`
-			StatusID int          `json:"status_id"`
-			Rating   *float64     `json:"rating"`
+			ID       int64 `json:"id"`
+			BookID   int64 `json:"book_id"`
+			StatusID int   `json:"status_id"`
 		} `json:"user_books"`
 	}
 	gqlQuery := `query FetchUserBooks($userID: Int!) {
@@ -409,7 +407,6 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 			id
 			book_id
 			status_id
-			rating
 		}
 	}`
 	if err := c.do(ctx, gqlQuery, map[string]any{"userID": userID}, &out); err != nil {
@@ -422,7 +419,6 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 			ID:       ub.ID,
 			BookID:   ub.BookID,
 			StatusID: ub.StatusID,
-			Rating:   ub.Rating,
 		}
 	}
 	return books, nil
@@ -456,39 +452,6 @@ func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int,
 	}
 	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, nil); err != nil {
 		return fmt.Errorf("insert user_book: %w", err)
-	}
-	return nil
-}
-
-// UpdateUserBook updates an existing user_books row (identified by its
-// row ID from FetchUserBooks) with a new status (and optional rating and
-// finished date). It does NOT check for an existing row first — the
-// caller supplies the row ID from the FetchUserBooks cache.
-//
-// userDate is the date the user finished the book (from Audible's
-// listening_status.finished_at_timestamp), or nil if not available.
-// It maps to Hardcover's user_date field (the "end date" shown in the
-// reading log). Only set for finished books.
-//
-// The mutation shape (argument types and the update mutation's name/args)
-// was confirmed via live GraphQL introspection against Hardcover's real
-// API on 2026-08-01.
-func (c *Client) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
-	updateQuery := `mutation UpdateUserBook($id: Int!, $object: UserBookUpdateInput!) {
-		update_user_book(id: $id, object: $object) { id }
-	}`
-	object := map[string]any{"status_id": statusID}
-	if rating != nil {
-		object["rating"] = *rating
-	}
-	if userDate != nil {
-		object["user_date"] = userDate.Format("2006-01-02")
-	}
-	if editionID != nil {
-		object["edition_id"] = *editionID
-	}
-	if err := c.do(ctx, updateQuery, map[string]any{"id": rowID, "object": object}, nil); err != nil {
-		return fmt.Errorf("update user_book %d: %w", rowID, err)
 	}
 	return nil
 }

@@ -382,37 +382,6 @@ var DefaultResponseGroups = []string{
 	"sku",
 }
 
-// GetRawLibrary retrieves the user's Audible library as raw JSON bytes,
-// without unmarshaling into the Book struct. This preserves all fields
-// returned by the API (including any not modeled by Book), which is
-// useful for debugging which fields Audible actually returns for a
-// given response group.
-func (c *Client) GetRawLibrary(ctx context.Context, opts ...LibraryOption) ([]byte, error) {
-	options := &libraryOptions{
-		responseGroups: DefaultResponseGroups,
-		pageSize:       50,
-		page:           1,
-		sortBy:         "-PurchaseDate",
-	}
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	params := url.Values{
-		"response_groups": []string{strings.Join(options.responseGroups, ",")},
-		"num_results":     []string{strconv.Itoa(options.pageSize)},
-		"page":            []string{strconv.Itoa(options.page)},
-		"sort_by":         []string{options.sortBy},
-	}
-
-	if options.purchasedAfter != "" {
-		params.Set("purchased_after", options.purchasedAfter)
-	}
-
-	path := "/1.0/library?" + params.Encode()
-	return c.doAPIRequest(ctx, "GET", path, "")
-}
-
 // GetLibrary retrieves the user's Audible library.
 func (c *Client) GetLibrary(ctx context.Context, opts ...LibraryOption) (*Library, error) {
 	// Apply options

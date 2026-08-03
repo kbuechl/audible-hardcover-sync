@@ -37,7 +37,6 @@ func TestStore_Open_InvalidPath(t *testing.T) {
 }
 
 func TestStore_UpsertAndGet(t *testing.T) {
-	rating := 4.5
 	bookID := int64(12345)
 
 	tests := []struct {
@@ -53,7 +52,6 @@ func TestStore_UpsertAndGet(t *testing.T) {
 				Author:          "J.R.R. Tolkien",
 				Status:          StatusFinished,
 				PercentComplete: 100,
-				Rating:          &rating,
 				HardcoverBookID: &bookID,
 			},
 			check: func(t *testing.T, got *BookState) {
@@ -69,9 +67,6 @@ func TestStore_UpsertAndGet(t *testing.T) {
 				if got.HardcoverBookID == nil || *got.HardcoverBookID != bookID {
 					t.Errorf("HardcoverBookID = %v, want %d", got.HardcoverBookID, bookID)
 				}
-				if got.Rating == nil || *got.Rating != 4.5 {
-					t.Errorf("Rating = %v, want 4.5", got.Rating)
-				}
 			},
 		},
 		{
@@ -80,13 +75,9 @@ func TestStore_UpsertAndGet(t *testing.T) {
 				ASIN:            "B00NILFIELDS",
 				Status:          StatusInProgress,
 				PercentComplete: 40,
-				Rating:          nil,
 				HardcoverBookID: nil,
 			},
 			check: func(t *testing.T, got *BookState) {
-				if got.Rating != nil {
-					t.Errorf("Rating = %v, want nil", got.Rating)
-				}
 				if got.HardcoverBookID != nil {
 					t.Errorf("HardcoverBookID = %v, want nil", got.HardcoverBookID)
 				}
@@ -120,14 +111,12 @@ func TestStore_UpsertAndGet(t *testing.T) {
 
 func TestStore_Upsert_Overwrites(t *testing.T) {
 	s := openTestStore(t)
-	rating := 4.5
 	bookID := int64(12345)
 
 	in := BookState{
 		ASIN:            "B00WRHY15Y",
 		Status:          StatusFinished,
 		PercentComplete: 100,
-		Rating:          &rating,
 		HardcoverBookID: &bookID,
 	}
 	if err := s.Upsert(in); err != nil {

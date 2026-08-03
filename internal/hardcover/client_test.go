@@ -124,8 +124,8 @@ func TestClient_FetchUserBooks(t *testing.T) {
 			return map[string]any{"me": []map[string]any{{"id": 42, "username": "reader"}}}, nil
 		case strings.Contains(query, "user_books("):
 			return map[string]any{"user_books": []map[string]any{
-				{"id": 100, "book_id": float64(777), "status_id": float64(StatusRead), "rating": nil},
-				{"id": 200, "book_id": float64(888), "status_id": float64(StatusCurrentlyReading), "rating": float64(4)},
+				{"id": 100, "book_id": float64(777), "status_id": float64(StatusRead)},
+				{"id": 200, "book_id": float64(888), "status_id": float64(StatusCurrentlyReading)},
 			}}, nil
 		default:
 			t.Fatalf("unexpected query: %s", query)
@@ -184,37 +184,6 @@ func TestClient_InsertUserBook(t *testing.T) {
 	}
 	if !insertCalled {
 		t.Error("expected insert_user_book to be called")
-	}
-}
-
-func TestClient_UpdateUserBook(t *testing.T) {
-	var updateCalled bool
-	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
-		switch {
-		case strings.Contains(query, "update_user_book"):
-			updateCalled = true
-			if vars["id"] != float64(555) {
-				t.Errorf("update called with id = %v, want 555", vars["id"])
-			}
-			object, ok := vars["object"].(map[string]any)
-			if !ok {
-				t.Fatalf("update called with object = %v (%T), want a map", vars["object"], vars["object"])
-			}
-			if object["status_id"] != float64(StatusRead) {
-				t.Errorf("update object[status_id] = %v, want %d", object["status_id"], StatusRead)
-			}
-			return map[string]any{"update_user_book": map[string]any{"id": 555}}, nil
-		default:
-			t.Fatalf("unexpected query: %s", query)
-			return nil, nil
-		}
-	})
-
-	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, nil, nil); err != nil {
-		t.Fatalf("UpdateUserBook() error = %v", err)
-	}
-	if !updateCalled {
-		t.Error("expected update_user_book to be called")
 	}
 }
 
@@ -390,26 +359,6 @@ func TestClient_InsertUserBook_WithoutUserDate(t *testing.T) {
 	}
 	if _, hasDate := capturedObject["user_date"]; hasDate {
 		t.Errorf("object[user_date] = %v, want absent for nil userDate", capturedObject["user_date"])
-	}
-}
-
-func TestClient_UpdateUserBook_WithUserDate(t *testing.T) {
-	var capturedObject map[string]any
-	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
-		if strings.Contains(query, "update_user_book") {
-			capturedObject = vars["object"].(map[string]any)
-			return map[string]any{"update_user_book": map[string]any{"id": 555}}, nil
-		}
-		t.Fatalf("unexpected query: %s", query)
-		return nil, nil
-	})
-
-	finishedAt := time.Date(2025, 10, 11, 19, 34, 29, 0, time.UTC)
-	if err := c.UpdateUserBook(context.Background(), 555, StatusRead, nil, &finishedAt, nil); err != nil {
-		t.Fatalf("UpdateUserBook() error = %v", err)
-	}
-	if got := capturedObject["user_date"]; got != "2025-10-11" {
-		t.Errorf("object[user_date] = %v, want %q", got, "2025-10-11")
 	}
 }
 

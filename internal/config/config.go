@@ -34,9 +34,9 @@ func Load() (Config, error) {
 		interval = d
 	}
 
-	stateDBPath := envOrDefault("STATE_DB_PATH", "/data/state.db")
-	credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
-	webUIPort := envOrDefault("WEB_UI_PORT", "8080")
+	stateDBPath := EnvOrDefault("STATE_DB_PATH", "/data/state.db")
+	credentialsPath := EnvOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
+	webUIPort := EnvOrDefault("WEB_UI_PORT", "8080")
 	publicURL := os.Getenv("PUBLIC_URL")
 
 	var notifyURLs []string
@@ -68,8 +68,7 @@ func Load() (Config, error) {
 
 // parseMatchConfidence parses the MATCH_CONFIDENCE setting, accepting either
 // a named preset ("strict"=0.95, "medium"=0.75, "loose"=0.55) or a raw
-// number. Values > 1 (or with a trailing "%") are treated as a percentage
-// and divided by 100; values in [0,1] are used as-is. An empty string
+// number in [0,1]. Values outside [0,1] are rejected. An empty string
 // defaults to "strict" (0.95) for safe-by-default behavior.
 func parseMatchConfidence(v string) (float64, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
@@ -83,26 +82,21 @@ func parseMatchConfidence(v string) (float64, error) {
 		return 0.55, nil
 	}
 
-	trimmed := strings.TrimSpace(v)
-	hadPercentSign := strings.HasSuffix(trimmed, "%")
-	numStr := strings.TrimSuffix(trimmed, "%")
-
-	f, err := strconv.ParseFloat(numStr, 64)
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid MATCH_CONFIDENCE %q: %w", v, err)
 	}
 
-	if hadPercentSign || f > 1 {
-		f = f / 100
-	}
-
 	if f < 0 || f > 1 {
-		return 0, fmt.Errorf("MATCH_CONFIDENCE %q is out of range [0,1] after normalization (got %v)", v, f)
+		return 0, fmt.Errorf("MATCH_CONFIDENCE %q is out of range [0,1] (use a preset name or a value between 0 and 1)", v)
 	}
 	return f, nil
 }
 
-func envOrDefault(key, def string) string {
+// EnvOrDefault returns the value of the environment variable key, or def
+// when the variable is unset or empty. Exported so other packages (e.g.
+// cmd/sync-tool) can share the same behavior.
+func EnvOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}

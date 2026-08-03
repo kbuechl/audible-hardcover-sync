@@ -7,9 +7,10 @@ import (
 
 func TestLoad(t *testing.T) {
 	tests := []struct {
-		name string
-		env  map[string]string
-		want Config
+		name    string
+		env     map[string]string
+		want    Config
+		wantErr bool
 	}{
 		{
 			name: "defaults",
@@ -119,32 +120,14 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "match confidence: bare percentage number",
-			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "82"},
-			want: Config{
-				HardcoverAPIToken: "test-token",
-				SyncInterval:      6 * time.Hour,
-				StateDBPath:       "/data/state.db",
-				CredentialsPath:   "/data/credentials.json",
-				WebUIPort:         "8080",
-				PublicURL:         "",
-				NotifyURLs:        nil,
-				MatchConfidence:   0.82,
-			},
+			name:    "match confidence: bare percentage number is rejected",
+			env:     map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "82"},
+			wantErr: true,
 		},
 		{
-			name: "match confidence: explicit percent sign",
-			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "82%"},
-			want: Config{
-				HardcoverAPIToken: "test-token",
-				SyncInterval:      6 * time.Hour,
-				StateDBPath:       "/data/state.db",
-				CredentialsPath:   "/data/credentials.json",
-				WebUIPort:         "8080",
-				PublicURL:         "",
-				NotifyURLs:        nil,
-				MatchConfidence:   0.82,
-			},
+			name:    "match confidence: percent sign is rejected",
+			env:     map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "82%"},
+			wantErr: true,
 		},
 		{
 			name: "match confidence: zero is valid",
@@ -161,18 +144,9 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "match confidence: 100 percent is valid",
-			env:  map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "100%"},
-			want: Config{
-				HardcoverAPIToken: "test-token",
-				SyncInterval:      6 * time.Hour,
-				StateDBPath:       "/data/state.db",
-				CredentialsPath:   "/data/credentials.json",
-				WebUIPort:         "8080",
-				PublicURL:         "",
-				NotifyURLs:        nil,
-				MatchConfidence:   1.0,
-			},
+			name:    "match confidence: percent sign with 100 is rejected",
+			env:     map[string]string{"HARDCOVER_API_TOKEN": "test-token", "MATCH_CONFIDENCE": "100%"},
+			wantErr: true,
 		},
 		{
 			name: "match confidence: 1.0 fraction is valid",
@@ -209,6 +183,12 @@ func TestLoad(t *testing.T) {
 				t.Setenv(k, tt.env[k]) // empty string for unset keys, which clears any inherited value
 			}
 			got, err := Load()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Load() error = %v, want nil", err)
 			}
@@ -273,7 +253,7 @@ func TestLoad_InvalidMatchConfidence(t *testing.T) {
 
 func TestLoad_MatchConfidenceOutOfRange(t *testing.T) {
 	t.Setenv("HARDCOVER_API_TOKEN", "test-token")
-	t.Setenv("MATCH_CONFIDENCE", "150") // 150% -> 1.5, out of [0,1] after normalization
+	t.Setenv("MATCH_CONFIDENCE", "150") // 150 > 1, out of [0,1]
 	_, err := Load()
 	if err == nil {
 		t.Fatal("Load() error = nil, want error for MATCH_CONFIDENCE out of range")

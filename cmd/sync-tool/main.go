@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve|debug-library|debug-raw-library>")
+		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve>")
 		os.Exit(1)
 	}
 
@@ -21,7 +21,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "auth":
-		credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
+		credentialsPath := config.EnvOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
 		client := audible.New(audiblesdk.MarketplaceUS)
 		if err := runAuth(ctx, client, credentialsPath, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "auth failed:", err)
@@ -35,21 +35,6 @@ func main() {
 		}
 		if _, err := runOnce(ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "sync failed:", err)
-			os.Exit(1)
-		}
-	// TEMPORARY diagnostic — remove after debugging the Black Tongue Thief is_finished discrepancy (2026-08-01).
-	case "debug-library":
-		credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
-		if err := runDebugLibrary(ctx, credentialsPath, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "debug-library failed:", err)
-			os.Exit(1)
-		}
-	// TEMPORARY diagnostic — dumps raw Audible library JSON to investigate
-	// available date fields (2026-08-01).
-	case "debug-raw-library":
-		credentialsPath := envOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
-		if err := runDebugRawLibrary(ctx, credentialsPath, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "debug-raw-library failed:", err)
 			os.Exit(1)
 		}
 	case "serve":
@@ -66,11 +51,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unknown subcommand:", os.Args[1])
 		os.Exit(1)
 	}
-}
-
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

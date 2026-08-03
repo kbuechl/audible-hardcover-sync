@@ -36,11 +36,10 @@ type fakeHardcover struct {
 	byISBN             map[string]int64
 	editionByISBN      map[string]int64 // ISBN → edition_id returned by FindBookByISBN
 	searchResults      map[string][]hardcover.SearchResult
-	audioEditionByBook map[int64]int64 // bookID → edition_id returned by FindAudioEdition
+	audioEditionByBook map[int64]int64 // bookID → edition_id returned by FindDefaultEdition
 	searchErr          error
 	userBooks          map[int64]hardcover.UserBook // pre-seeded cache for FetchUserBooks
 	inserted           map[int64]upsertCall         // bookID → call
-	updated            map[int64]upsertCall         // rowID → call
 	upsertErr          error
 }
 
@@ -52,7 +51,6 @@ func newFakeHardcover() *fakeHardcover {
 		audioEditionByBook: map[int64]int64{},
 		userBooks:          map[int64]hardcover.UserBook{},
 		inserted:           map[int64]upsertCall{},
-		updated:            map[int64]upsertCall{},
 	}
 }
 
@@ -83,7 +81,7 @@ func (f *fakeHardcover) FetchUserBooks(ctx context.Context) (map[int64]hardcover
 	return out, nil
 }
 
-func (f *fakeHardcover) FindAudioEdition(ctx context.Context, bookID int64, asin string) (*int64, error) {
+func (f *fakeHardcover) FindDefaultEdition(ctx context.Context, bookID int64) (*int64, error) {
 	if ed, ok := f.audioEditionByBook[bookID]; ok {
 		return int64Ptr(ed), nil
 	}
@@ -95,14 +93,6 @@ func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, status
 		return f.upsertErr
 	}
 	f.inserted[bookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
-	return nil
-}
-
-func (f *fakeHardcover) UpdateUserBook(ctx context.Context, rowID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
-	if f.upsertErr != nil {
-		return f.upsertErr
-	}
-	f.updated[rowID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
 	return nil
 }
 
@@ -152,7 +142,7 @@ func TestRun(t *testing.T) {
 		byISBN             map[string]int64
 		editionByISBN      map[string]int64 // ISBN → edition_id FindBookByISBN should return
 		searchResults      map[string][]hardcover.SearchResult
-		audioEditionByBook map[int64]int64 // bookID → edition_id FindAudioEdition should return
+		audioEditionByBook map[int64]int64 // bookID → edition_id FindDefaultEdition should return
 		searchErr          error
 		userBooks          map[int64]hardcover.UserBook // pre-seeded Hardcover library cache
 		matchConfidence    float64
@@ -389,9 +379,6 @@ func TestRun(t *testing.T) {
 				if result.Unchanged != 1 {
 					t.Errorf("Unchanged = %d, want 1 (already-read book must not be downgraded)", result.Unchanged)
 				}
-				if len(fh.updated) != 0 {
-					t.Errorf("expected no update call for a book already at a higher status, got %v", fh.updated)
-				}
 				if len(fh.inserted) != 0 {
 					t.Errorf("expected no insert call for an existing book, got %v", fh.inserted)
 				}
@@ -412,9 +399,6 @@ func TestRun(t *testing.T) {
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
 				if result.Unchanged != 1 {
 					t.Errorf("Unchanged = %d, want 1 (existing book must be skipped)", result.Unchanged)
-				}
-				if len(fh.updated) != 0 {
-					t.Errorf("expected no update call for an existing book, got %v", fh.updated)
 				}
 				if len(fh.inserted) != 0 {
 					t.Errorf("expected no insert call for an existing book, got %v", fh.inserted)
@@ -437,8 +421,8 @@ func TestRun(t *testing.T) {
 				if result.Unchanged != 1 {
 					t.Errorf("Unchanged = %d, want 1 (already-read, no API call needed)", result.Unchanged)
 				}
-				if len(fh.updated) != 0 || len(fh.inserted) != 0 {
-					t.Errorf("expected no API calls for equal status, got updated=%v inserted=%v", fh.updated, fh.inserted)
+				if len(fh.inserted) != 0 {
+					t.Errorf("expected no API calls for equal status, got %v", fh.inserted)
 				}
 			},
 		},
@@ -501,12 +485,12 @@ func TestRun(t *testing.T) {
 			},
 		},
 		{
-			name: "fuzzy-matched book passes audio edition from FindAudioEdition to insert",
+			name: "fuzzy-matched book passes audio edition from FindDefaultEdition to insert",
 			items: []audible.LibraryItem{
 				{ASIN: "A19", Title: "System Collapse", Author: "Martha Wells", IsFinished: true, PercentComplete: 100},
 			},
 			// no ISBN — forces the fuzzy fallback path, which resolves the
-			// edition via a separate FindAudioEdition call
+			// edition via a separate FindDefaultEdition call
 			searchResults: map[string][]hardcover.SearchResult{
 				"System Collapse": {{ID: 888, Title: "System Collapse", AuthorNames: []string{"Martha Wells"}}},
 			},
@@ -521,7 +505,7 @@ func TestRun(t *testing.T) {
 					t.Fatalf("inserted = %v, want an entry for book id 888", fh.inserted)
 				}
 				if got.editionID == nil || *got.editionID != 8889 {
-					t.Errorf("editionID = %v, want 8889 (from FindAudioEdition)", got.editionID)
+					t.Errorf("editionID = %v, want 8889 (from FindDefaultEdition)", got.editionID)
 				}
 			},
 		},

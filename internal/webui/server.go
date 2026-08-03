@@ -1,10 +1,10 @@
 // Package webui provides a JSON API for a human to resolve books the
 // automated sync could not match deterministically (via
-// hardcover.Client.FindBookByISBN) to a Hardcover book_id. It is the only
-// part of this codebase that performs fuzzy title/author matching, via
-// hardcover.Client.SearchBooks, and it is human-supervised: a person
-// reviews the search results and picks the match, rather than the sync
-// path applying a fuzzy match automatically. The actual UI is a React SPA
+// hardcover.Client.FindBookByISBN) to a Hardcover book_id. It is the
+// human-supervised fuzzy match path: a person reviews the
+// hardcover.Client.SearchBooks results and picks the match, in contrast to
+// internal/sync's resolveByFuzzyMatch, which applies a confidence-scored
+// fuzzy title/author match automatically. The actual UI is a React SPA
 // (see frontend/) that consumes this API; the built SPA (frontend/dist) is
 // embedded and served for any request that doesn't match /api/*, with a
 // client-side-routing fallback to index.html (see static.go).
@@ -160,7 +160,7 @@ func (s *Server) handleAPIResolve(w http.ResponseWriter, r *http.Request) {
 	// unchanged-skip check (prior.Status == newly-computed status) can
 	// never match a real state.Status constant, which forces the next sync
 	// pass to treat this book as changed and actually call
-	// Hardcover.UpsertUserBook using the HardcoverBookID cached here.
+	// Hardcover.InsertUserBook using the HardcoverBookID cached here.
 	// Preserving the prior Status used to make a freshly-resolved book look
 	// "unchanged" on the very next run, so it silently never got synced to
 	// Hardcover — see the final whole-branch review finding this fixed.
