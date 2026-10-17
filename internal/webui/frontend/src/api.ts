@@ -1,11 +1,16 @@
 import type { UnmatchedBook, SearchResultItem } from './types'
 
-async function fetchJSON<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+async function fetchOK(input: RequestInfo, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, init)
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`${res.status} ${res.statusText}: ${body}`)
   }
+  return res
+}
+
+async function fetchJSON<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetchOK(input, init)
   return res.json() as Promise<T>
 }
 
@@ -23,7 +28,8 @@ export function searchHardcover(asin: string, query: string): Promise<SearchResu
 }
 
 export async function resolveMatch(asin: string, hardcoverBookId: number): Promise<void> {
-  await fetchJSON('/api/resolve', {
+  // /api/resolve replies 200 with an empty body, so don't parse JSON.
+  await fetchOK('/api/resolve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ asin, hardcoverBookId }),
