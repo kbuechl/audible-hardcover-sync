@@ -24,6 +24,12 @@ const (
 
 const defaultEndpoint = "https://api.hardcover.app/v1/graphql"
 
+// fallbackRequestGap spaces out requests only when Hardcover's response
+// carries no RateLimit headers to pace from. Mutations are never retried
+// on 429, so avoiding the 429 in the first place is the only way an insert
+// succeeds when the limiter trips.
+const fallbackRequestGap = 1100 * time.Millisecond
+
 // Client is not safe for concurrent use by multiple goroutines. In
 // particular, userIDCached lazily populates the userID field with no
 // synchronization, so sharing a single *Client across goroutines can race.
@@ -31,6 +37,8 @@ type Client struct {
 	token      string
 	endpoint   string
 	httpClient *http.Client
+
+	limiter *limiter
 
 	userID int64 // resolved lazily via Me(), cached for UpsertUserBook
 }
@@ -47,6 +55,7 @@ func New(token string) *Client {
 		token:      token,
 		endpoint:   defaultEndpoint,
 		httpClient: retryClient.StandardClient(),
+		limiter:    newLimiter(fallbackRequestGap),
 	}
 }
 
@@ -102,7 +111,29 @@ type gqlResponse struct {
 	Errors []gqlError      `json:"errors,omitempty"`
 }
 
+// pace blocks until the limiter allows the next request, or until ctx is
+// done. It fails fast with ErrDailyQuotaExhausted instead of waiting hours.
+func (c *Client) pace(ctx context.Context) error {
+	if err := c.limiter.dailyErr(time.Now()); err != nil {
+		return err
+	}
+	if wait := c.limiter.wait(time.Now()); wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
+}
+
 func (c *Client) do(ctx context.Context, query string, variables map[string]any, out any) error {
+	if err := c.pace(ctx); err != nil {
+		return fmt.Errorf("wait for rate limit: %w", err)
+	}
+
 	body, err := json.Marshal(gqlRequest{Query: query, Variables: variables})
 	if err != nil {
 		return fmt.Errorf("marshal graphql request: %w", err)
@@ -129,6 +160,7 @@ func (c *Client) do(ctx context.Context, query string, variables map[string]any,
 		return fmt.Errorf("graphql request: %w", err)
 	}
 	defer resp.Body.Close()
+	c.limiter.observe(resp.Header, time.Now())
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

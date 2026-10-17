@@ -3,6 +3,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -69,8 +70,8 @@ type Result struct {
 // state. Items that cannot be matched are marked unmatched and, if not
 // already notified, batched into a single notification at the end of the
 // pass. A per-book failure increments Result.Errored and is logged, but
-// never fails the run — only a failure to fetch the Audible library at all
-// returns a non-nil error.
+// never fails the run — only a failure to fetch the Audible library at all,
+// or Hardcover's daily request quota running out, returns a non-nil error.
 func Run(ctx context.Context, d Deps) (Result, error) {
 	var result Result
 
@@ -114,6 +115,9 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		if resolvedErr != nil {
 			slog.Error("resolve hardcover book id", "asin", item.ASIN, "error", resolvedErr)
 			result.Errored++
+			if errors.Is(resolvedErr, hardcover.ErrDailyQuotaExhausted) {
+				return result, resolvedErr
+			}
 			continue
 		}
 		if resolved.BookID == 0 {
@@ -163,6 +167,9 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID); err != nil {
 			slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
 			result.Errored++
+			if errors.Is(err, hardcover.ErrDailyQuotaExhausted) {
+				return result, err
+			}
 			continue
 		}
 

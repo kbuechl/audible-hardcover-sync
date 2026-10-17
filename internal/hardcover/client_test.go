@@ -42,6 +42,7 @@ func newTestServer(t *testing.T, handler func(query string, vars map[string]any)
 	c := New("test-token")
 	c.endpoint = srv.URL
 	c.httpClient = srv.Client()
+	c.limiter = newLimiter(0)
 	return srv, c
 }
 
@@ -814,5 +815,32 @@ func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 	}
 	if got := mutationAttempts.Load(); got != 1 {
 		t.Errorf("mutation attempts = %d, want 1 (mutations must not be retried on 429)", got)
+	}
+}
+
+func TestClient_PacesRequests(t *testing.T) {
+	_, c := newTestServer(t, func(string, map[string]any) (any, error) {
+		return map[string]any{}, nil
+	})
+	c.limiter = newLimiter(50 * time.Millisecond)
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		if err := c.do(context.Background(), "query { me { id } }", nil, nil); err != nil {
+			t.Fatalf("do: %v", err)
+		}
+	}
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("3 requests took %v, want >= 100ms with 50ms pacing", elapsed)
+	}
+}
+
+func TestClient_PaceRespectsContextCancel(t *testing.T) {
+	c := &Client{limiter: newLimiter(time.Hour)}
+	c.limiter.observe(http.Header{}, time.Now())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.pace(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pace err = %v, want context.Canceled", err)
 	}
 }

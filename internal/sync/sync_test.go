@@ -624,3 +624,23 @@ func TestRun_FetchLibraryError(t *testing.T) {
 		t.Errorf("notified = %v, want no notifications sent on fetch failure", fn.notified)
 	}
 }
+
+func TestRun_StopsWhenDailyQuotaExhausted(t *testing.T) {
+	fa := &fakeAudible{items: []audible.LibraryItem{
+		{ASIN: "A1", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
+		{ASIN: "A2", ISBN13: "9780641723452", IsFinished: true, PercentComplete: 100},
+	}}
+	fh := newFakeHardcover()
+	fh.byISBN["9780641723445"] = 777
+	fh.byISBN["9780641723452"] = 888
+	fh.upsertErr = fmt.Errorf("insert user_book: %w", hardcover.ErrDailyQuotaExhausted)
+	store := newTestStore(t)
+
+	result, err := Run(context.Background(), Deps{Audible: fa, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+	if !errors.Is(err, hardcover.ErrDailyQuotaExhausted) {
+		t.Fatalf("Run() error = %v, want ErrDailyQuotaExhausted", err)
+	}
+	if result.Errored != 1 {
+		t.Errorf("Errored = %d, want 1 (run stops after the first quota failure)", result.Errored)
+	}
+}
