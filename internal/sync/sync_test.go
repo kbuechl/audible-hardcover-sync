@@ -644,3 +644,21 @@ func TestRun_StopsWhenDailyQuotaExhausted(t *testing.T) {
 		t.Errorf("Errored = %d, want 1 (run stops after the first quota failure)", result.Errored)
 	}
 }
+
+func TestRun_UnmatchedStoresAudibleCover(t *testing.T) {
+	fa := &fakeAudible{items: []audible.LibraryItem{
+		{ASIN: "A1", Title: "Nowhere", IsFinished: true, PercentComplete: 100, CoverURL: "https://m.media-amazon.com/500.jpg"},
+	}}
+	store := newTestStore(t)
+
+	if _, err := Run(context.Background(), Deps{Audible: fa, Hardcover: newFakeHardcover(), Store: store, Notifier: &fakeNotifier{}}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	got, err := store.Get("A1")
+	if err != nil || got == nil {
+		t.Fatalf("Get(A1) = %v, %v", got, err)
+	}
+	if !got.Unmatched || got.CoverURL != "https://m.media-amazon.com/500.jpg" {
+		t.Errorf("got Unmatched=%v CoverURL=%q, want unmatched with Audible cover", got.Unmatched, got.CoverURL)
+	}
+}

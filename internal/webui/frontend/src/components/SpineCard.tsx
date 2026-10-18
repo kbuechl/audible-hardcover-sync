@@ -24,7 +24,7 @@ export default function SpineCard({ book, active, onSelect }: SpineCardProps) {
     >
       <div className={`w-1.5 shrink-0 ${active ? 'bg-gold' : 'bg-pine'}`} />
       <div className="p-3 flex gap-3 items-center min-w-0 flex-1">
-        <CoverThumb title={book.title || book.asin} size="sm" />
+        <CoverThumb title={book.title || book.asin} coverUrl={book.coverUrl} size="sm" />
         <div className="min-w-0 flex-1">
           <p className="font-serif font-semibold text-sm truncate">{book.title || book.asin}</p>
           <p className="text-xs text-muted mb-1">{book.author}</p>

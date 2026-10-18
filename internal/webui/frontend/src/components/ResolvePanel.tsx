@@ -16,7 +16,7 @@ export default function ResolvePanel({ book, onConfirm, confirming = false }: Re
     <div className="bg-panel border border-line rounded-xl p-7">
       <p className="font-mono text-[0.68rem] uppercase tracking-wide text-muted mb-2">Resolve match</p>
       <div className="flex gap-4 items-start mb-6">
-        <CoverThumb title={book.title || book.asin} size="lg" />
+        <CoverThumb title={book.title || book.asin} coverUrl={book.coverUrl} size="lg" />
         <div>
           <h2 className="font-serif text-2xl font-semibold">{book.title || book.asin}</h2>
           <p className="text-muted">

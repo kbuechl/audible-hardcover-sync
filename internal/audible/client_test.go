@@ -123,3 +123,23 @@ func TestResponseGroups_ExtendsDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestToLibraryItem_CoverURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		images audiblesdk.ProductImages
+		want   string
+	}{
+		{name: "prefers 500px", images: audiblesdk.ProductImages{Image500: "https://m.media-amazon.com/500.jpg", Image1024: "https://m.media-amazon.com/1024.jpg"}, want: "https://m.media-amazon.com/500.jpg"},
+		{name: "falls back to 1024px", images: audiblesdk.ProductImages{Image1024: "https://m.media-amazon.com/1024.jpg"}, want: "https://m.media-amazon.com/1024.jpg"},
+		{name: "none", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := toLibraryItem(audiblesdk.Book{ASIN: "B1", ProductImages: tt.images})
+			if item.CoverURL != tt.want {
+				t.Errorf("CoverURL = %q, want %q", item.CoverURL, tt.want)
+			}
+		})
+	}
+}

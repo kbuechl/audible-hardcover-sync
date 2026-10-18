@@ -353,3 +353,19 @@ func TestAPIResolve(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIUnmatched_IncludesCoverURL(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.Upsert(state.BookState{ASIN: "A1", Status: state.StatusFinished, Unmatched: true, CoverURL: "https://m.media-amazon.com/500.jpg"}); err != nil {
+		t.Fatalf("seed error = %v", err)
+	}
+	srv := New(store, &fakeSearcher{})
+
+	for _, path := range []string{"/api/unmatched", "/api/unmatched/A1"} {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if !bytes.Contains(rec.Body.Bytes(), []byte(`"coverUrl":"https://m.media-amazon.com/500.jpg"`)) {
+			t.Errorf("%s body = %s, want coverUrl", path, rec.Body.String())
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -235,4 +236,56 @@ func TestStore_MarkNotified(t *testing.T) {
 			t.Errorf("Get() = %+v, want nil (no row should have been created)", got)
 		}
 	})
+}
+
+func TestStore_CoverURLRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	in := BookState{ASIN: "B1", Status: StatusFinished, Unmatched: true, CoverURL: "https://m.media-amazon.com/500.jpg"}
+	if err := s.Upsert(in); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	got, err := s.Get("B1")
+	if err != nil || got == nil {
+		t.Fatalf("Get() = %v, %v", got, err)
+	}
+	if got.CoverURL != in.CoverURL {
+		t.Errorf("Get().CoverURL = %q, want %q", got.CoverURL, in.CoverURL)
+	}
+	list, err := s.ListUnmatched()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListUnmatched() = %v, %v", list, err)
+	}
+	if list[0].CoverURL != in.CoverURL {
+		t.Errorf("ListUnmatched()[0].CoverURL = %q, want %q", list[0].CoverURL, in.CoverURL)
+	}
+}
+
+func TestStore_Open_AddsCoverURLToExistingDB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	// Schema as it existed before cover_url was added.
+	if _, err := db.Exec(`CREATE TABLE sync_state (
+		asin TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL, percent_complete REAL NOT NULL DEFAULT 0, hardcover_book_id INTEGER,
+		unmatched INTEGER NOT NULL DEFAULT 0, notified_unmatched INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL);
+		INSERT INTO sync_state (asin, status, unmatched, updated_at) VALUES ('OLD', 'finished', 1, '2026-01-01T00:00:00Z');`); err != nil {
+		t.Fatalf("seed old schema: %v", err)
+	}
+	db.Close()
+
+	for i := 0; i < 2; i++ { // second open must not fail on the existing column
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i+1, err)
+		}
+		got, err := s.Get("OLD")
+		s.Close()
+		if err != nil || got == nil || got.CoverURL != "" {
+			t.Fatalf("Get(OLD) = %+v, %v; want existing row with empty CoverURL", got, err)
+		}
+	}
 }

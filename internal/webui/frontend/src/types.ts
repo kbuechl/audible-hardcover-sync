@@ -4,6 +4,7 @@ export interface UnmatchedBook {
   author: string
   status: string
   percentComplete: number
+  coverUrl?: string
 }
 
 export interface SearchResultItem {

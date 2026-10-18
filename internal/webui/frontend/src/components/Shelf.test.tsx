@@ -31,4 +31,12 @@ describe('Shelf', () => {
     screen.getByText('Book One').closest('button')!.click()
     expect(onSelect).toHaveBeenCalledWith('A1')
   })
+
+  it('shows the Audible cover when one is available', () => {
+    const books: UnmatchedBook[] = [
+      { asin: 'A1', title: 'Book One', author: 'Author One', status: 'finished', percentComplete: 100, coverUrl: 'https://m.media-amazon.com/500.jpg' },
+    ]
+    render(<Shelf books={books} selectedAsin={null} onSelect={vi.fn()} />)
+    expect(screen.getByAltText('Cover of Book One')).toHaveAttribute('src', 'https://m.media-amazon.com/500.jpg')
+  })
 })

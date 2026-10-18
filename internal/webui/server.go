@@ -51,6 +51,7 @@ type unmatchedBookDTO struct {
 	Author          string  `json:"author"`
 	Status          string  `json:"status"`
 	PercentComplete float64 `json:"percentComplete"`
+	CoverURL        string  `json:"coverUrl,omitempty"`
 }
 
 func toUnmatchedBookDTO(bs state.BookState) unmatchedBookDTO {
@@ -60,6 +61,7 @@ func toUnmatchedBookDTO(bs state.BookState) unmatchedBookDTO {
 		Author:          bs.Author,
 		Status:          string(bs.Status),
 		PercentComplete: bs.PercentComplete,
+		CoverURL:        bs.CoverURL,
 	}
 }
 

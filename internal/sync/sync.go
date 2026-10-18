@@ -129,6 +129,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 				PercentComplete:   item.PercentComplete,
 				Unmatched:         true,
 				NotifiedUnmatched: prior != nil && prior.NotifiedUnmatched,
+				CoverURL:          item.CoverURL,
 			}
 			if err := d.Store.Upsert(bs); err != nil {
 				slog.Error("persist unmatched state", "asin", item.ASIN, "error", err)

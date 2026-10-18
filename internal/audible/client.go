@@ -4,6 +4,7 @@
 package audible
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -32,6 +33,9 @@ type LibraryItem struct {
 	// provided_review.ratings.overall_rating. Nil if the user hasn't
 	// rated the book on Audible.
 	Rating *int
+	// CoverURL is Audible's cover art (500px, falling back to 1024px).
+	// Empty if Audible returned no product images.
+	CoverURL string
 }
 
 // responseGroups extends the SDK's default set (WithResponseGroups replaces
@@ -118,6 +122,7 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 		PercentComplete: b.PercentComplete,
 		FinishedAt:      parseAudibleTimestamp(b.ListeningStatus.FinishedAtTimestamp),
 		Rating:          rating,
+		CoverURL:        cmp.Or(b.ProductImages.Image500, b.ProductImages.Image1024),
 	}
 }
 
