@@ -26,7 +26,10 @@ type BookState struct {
 	Unmatched         bool
 	NotifiedUnmatched bool
 	CoverURL          string // Audible cover art, shown on the manual-match page
-	UpdatedAt         time.Time
+	// RelistenReadID is the Hardcover read this tool opened for a re-listen
+	// that hasn't finished yet. nil when no re-listen is in progress.
+	RelistenReadID *int64
+	UpdatedAt      time.Time
 }
 
 type Store struct {
@@ -48,22 +51,23 @@ CREATE TABLE IF NOT EXISTS sync_state (
     unmatched INTEGER NOT NULL DEFAULT 0,
     notified_unmatched INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL,
-    cover_url TEXT NOT NULL DEFAULT ''
+    cover_url TEXT NOT NULL DEFAULT '',
+    relisten_read_id INTEGER
 );`
 
-// addCoverURLColumn upgrades databases created before cover_url existed.
-// CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so the
-// column has to be added separately when missing.
-func addCoverURLColumn(db *sql.DB) error {
+// addColumn upgrades databases created before a column existed. CREATE
+// TABLE IF NOT EXISTS leaves an existing table untouched, so new columns
+// have to be added separately when missing.
+func addColumn(db *sql.DB, name, ddl string) error {
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sync_state') WHERE name = 'cover_url'`).Scan(&n); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('sync_state') WHERE name = ?`, name).Scan(&n); err != nil {
 		return fmt.Errorf("inspect sync_state columns: %w", err)
 	}
 	if n > 0 {
 		return nil
 	}
-	if _, err := db.Exec(`ALTER TABLE sync_state ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''`); err != nil {
-		return fmt.Errorf("add cover_url column: %w", err)
+	if _, err := db.Exec(`ALTER TABLE sync_state ADD COLUMN ` + ddl); err != nil {
+		return fmt.Errorf("add %s column: %w", name, err)
 	}
 	return nil
 }
@@ -77,9 +81,14 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := addCoverURLColumn(db); err != nil {
-		db.Close()
-		return nil, err
+	for name, ddl := range map[string]string{
+		"cover_url":        `cover_url TEXT NOT NULL DEFAULT ''`,
+		"relisten_read_id": `relisten_read_id INTEGER`,
+	} {
+		if err := addColumn(db, name, ddl); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -96,15 +105,18 @@ func (s *Store) Close() error {
 func scanBookState(scanner func(dest ...any) error) (BookState, error) {
 	var bs BookState
 	var updatedAt string
-	var hardcoverBookID sql.NullInt64
+	var hardcoverBookID, relistenReadID sql.NullInt64
 	var unmatched, notified int
 
 	if err := scanner(&bs.ASIN, &bs.Title, &bs.Author, &bs.Status, &bs.PercentComplete, &hardcoverBookID,
-		&unmatched, &notified, &updatedAt, &bs.CoverURL); err != nil {
+		&unmatched, &notified, &updatedAt, &bs.CoverURL, &relistenReadID); err != nil {
 		return bs, err
 	}
 	if hardcoverBookID.Valid {
 		bs.HardcoverBookID = &hardcoverBookID.Int64
+	}
+	if relistenReadID.Valid {
+		bs.RelistenReadID = &relistenReadID.Int64
 	}
 	bs.Unmatched = unmatched != 0
 	bs.NotifiedUnmatched = notified != 0
@@ -119,7 +131,7 @@ func scanBookState(scanner func(dest ...any) error) (BookState, error) {
 func (s *Store) Get(asin string) (*BookState, error) {
 	row := s.db.QueryRow(`
 		SELECT asin, title, author, status, percent_complete, hardcover_book_id,
-		       unmatched, notified_unmatched, updated_at, cover_url
+		       unmatched, notified_unmatched, updated_at, cover_url, relisten_read_id
 		FROM sync_state WHERE asin = ?`, asin)
 
 	bs, err := scanBookState(row.Scan)
@@ -135,8 +147,8 @@ func (s *Store) Get(asin string) (*BookState, error) {
 func (s *Store) Upsert(bs BookState) error {
 	_, err := s.db.Exec(`
 		INSERT INTO sync_state
-			(asin, title, author, status, percent_complete, hardcover_book_id, unmatched, notified_unmatched, updated_at, cover_url)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(asin, title, author, status, percent_complete, hardcover_book_id, unmatched, notified_unmatched, updated_at, cover_url, relisten_read_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(asin) DO UPDATE SET
 			title = excluded.title,
 			author = excluded.author,
@@ -146,9 +158,10 @@ func (s *Store) Upsert(bs BookState) error {
 			unmatched = excluded.unmatched,
 			notified_unmatched = excluded.notified_unmatched,
 			updated_at = excluded.updated_at,
-			cover_url = excluded.cover_url`,
+			cover_url = excluded.cover_url,
+			relisten_read_id = excluded.relisten_read_id`,
 		bs.ASIN, bs.Title, bs.Author, bs.Status, bs.PercentComplete, bs.HardcoverBookID,
-		boolToInt(bs.Unmatched), boolToInt(bs.NotifiedUnmatched), time.Now().Format(time.RFC3339), bs.CoverURL)
+		boolToInt(bs.Unmatched), boolToInt(bs.NotifiedUnmatched), time.Now().Format(time.RFC3339), bs.CoverURL, bs.RelistenReadID)
 	if err != nil {
 		return fmt.Errorf("upsert %q: %w", bs.ASIN, err)
 	}
@@ -158,7 +171,7 @@ func (s *Store) Upsert(bs BookState) error {
 func (s *Store) ListUnmatched() ([]BookState, error) {
 	rows, err := s.db.Query(`
 		SELECT asin, title, author, status, percent_complete, hardcover_book_id,
-		       unmatched, notified_unmatched, updated_at, cover_url
+		       unmatched, notified_unmatched, updated_at, cover_url, relisten_read_id
 		FROM sync_state WHERE unmatched = 1`)
 	if err != nil {
 		return nil, fmt.Errorf("list unmatched: %w", err)

@@ -45,6 +45,15 @@ type fakeHardcover struct {
 	progress           map[int64]int // user_book id → progress_seconds set
 	progressErr        error
 	nextUserBookID     int64
+	reads              map[int64]*fakeRead // read id → read opened by StartRead
+	nextReadID         int64
+}
+
+type fakeRead struct {
+	userBookID      int64
+	startedAt       time.Time
+	progressSeconds int
+	finishedAt      *time.Time
 }
 
 func newFakeHardcover() *fakeHardcover {
@@ -57,6 +66,8 @@ func newFakeHardcover() *fakeHardcover {
 		inserted:           map[int64]upsertCall{},
 		progress:           map[int64]int{},
 		nextUserBookID:     5000,
+		reads:              map[int64]*fakeRead{},
+		nextReadID:         9000,
 	}
 }
 
@@ -83,6 +94,15 @@ func (f *fakeHardcover) SearchBooks(ctx context.Context, query string, perPage i
 }
 
 func (f *fakeHardcover) FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error) {
+	for bookID, ub := range f.userBooks {
+		ub.OpenReadIDs = nil
+		for id, r := range f.reads {
+			if r.userBookID == ub.ID && r.finishedAt == nil {
+				ub.OpenReadIDs = append(ub.OpenReadIDs, id)
+			}
+		}
+		f.userBooks[bookID] = ub
+	}
 	out := make(map[int64]hardcover.UserBook, len(f.userBooks))
 	for k, v := range f.userBooks {
 		out[k] = v
@@ -111,6 +131,29 @@ func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, p
 		return f.progressErr
 	}
 	f.progress[userBookID] = fallbackSeconds
+	return nil
+}
+
+// StartRead mirrors the real client's dedupe: an open read on the same
+// user_book started on or after startedAt is adopted instead of inserting.
+func (f *fakeHardcover) StartRead(ctx context.Context, userBookID int64, startedAt time.Time, progressSeconds int) (int64, error) {
+	for id, r := range f.reads {
+		if r.userBookID == userBookID && r.finishedAt == nil && !r.startedAt.Before(startedAt.Truncate(24*time.Hour)) {
+			return id, nil
+		}
+	}
+	f.nextReadID++
+	f.reads[f.nextReadID] = &fakeRead{userBookID: userBookID, startedAt: startedAt, progressSeconds: progressSeconds}
+	return f.nextReadID, nil
+}
+
+func (f *fakeHardcover) UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error {
+	f.reads[readID].progressSeconds = progressSeconds
+	return nil
+}
+
+func (f *fakeHardcover) FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error {
+	f.reads[readID].finishedAt = &finishedAt
 	return nil
 }
 

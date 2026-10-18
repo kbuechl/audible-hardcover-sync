@@ -58,6 +58,12 @@ vendored source and dependencies with their licenses.
   - The one exception is listening progress: for a book that is Currently
     Reading on Hardcover, progress is moved forward to match Audible on each
     sync. It is never lowered, and nothing else about the entry changes.
+  - Re-listens add a new read. When a book is Read on Hardcover and you
+    start it again on Audible (back at 10% or less), or start the audiobook
+    of a book you read elsewhere, the sync adds a new read to the entry,
+    keeps its progress moving forward, and finishes it when Audible does.
+    The entry stays Read. Progress synced to Hardcover from other apps
+    (Kobo, CWA) never starts a re-listen.
 - **New entries get.** When a book is not already on Hardcover, the sync
   inserts it with:
   - Status (Read for finished, Currently Reading for in-progress).

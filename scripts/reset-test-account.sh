@@ -4,6 +4,10 @@
 #
 # Usage: scripts/reset-test-account.sh <expected-hardcover-username>
 #
+# Warning: Audible overwrites a book's finish date when it is restarted, so
+# after a reset, re-listened books are re-added with the restart date and
+# their original finish dates cannot be recovered.
+#
 # The username argument is a guard: the script refuses to delete anything
 # unless the token in .env belongs to exactly that user.
 set -euo pipefail

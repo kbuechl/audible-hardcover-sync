@@ -29,6 +29,9 @@ type HardcoverClient interface {
 	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
 	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error)
 	SetReadProgress(ctx context.Context, userBookID int64, percent float64, fallbackSeconds int) error
+	StartRead(ctx context.Context, userBookID int64, startedAt time.Time, progressSeconds int) (int64, error)
+	UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error
+	FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -151,10 +154,11 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		// book read in print and marked Read on Hardcover won't be
 		// downgraded when the audiobook is in-progress on Audible, a
 		// manually-set rating won't be overwritten, and a manually-set
-		// finish date won't be clobbered. The one exception is listening
-		// progress on a Currently Reading book, which only moves forward.
+		// finish date won't be clobbered. The exceptions are listening
+		// progress on a Currently Reading book, which only moves forward,
+		// and re-listens, which add a new read (see syncExisting).
 		if existing, hasExisting := userBooks[bookID]; hasExisting {
-			if pushExistingProgress(ctx, d, item, status, existing, bookID) {
+			if syncExisting(ctx, d, item, status, existing, prior, bookID) {
 				result.Synced++
 			} else {
 				result.Unchanged++
@@ -223,7 +227,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 
 func desiredStatus(item audible.LibraryItem) (status state.Status, statusID int, ok bool) {
 	switch {
-	case item.IsFinished:
+	case item.IsFinished, isTailReplay(item):
 		return state.StatusFinished, hardcover.StatusRead, true
 	case item.PercentComplete > 0:
 		return state.StatusInProgress, hardcover.StatusCurrentlyReading, true
@@ -310,32 +314,19 @@ func progressedSince(item audible.LibraryItem, status state.Status, prior *state
 }
 
 // pushExistingProgress moves progress forward on a book that is already
-// Currently Reading on Hardcover, and records the new percent in state. It
-// never lowers progress and never touches a book in any other status. It
-// reports whether Hardcover was updated.
-func pushExistingProgress(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64) bool {
+// Currently Reading on Hardcover. It never lowers progress and never
+// touches a book in any other status. It reports whether Hardcover was
+// updated, and whether the update failed (so the caller can retry it).
+func pushExistingProgress(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64) (synced, failed bool) {
 	if status != state.StatusInProgress || existing.StatusID != hardcover.StatusCurrentlyReading {
-		return false
+		return false, false
 	}
-	// Compare in Hardcover's terms: its edition length when known.
-	target := progressSeconds(item)
-	if existing.AudioSeconds > 0 {
-		target = hardcover.ProgressSecondsFor(item.PercentComplete, existing.AudioSeconds)
-	}
-	if target <= existing.ProgressSeconds {
-		return false
+	if hardcoverSeconds(item, existing) <= existing.ProgressSeconds {
+		return false, false
 	}
 	if err := d.Hardcover.SetReadProgress(ctx, existing.ID, item.PercentComplete, progressSeconds(item)); err != nil {
 		slog.Error("set hardcover progress", "asin", item.ASIN, "book_id", bookID, "error", err)
-		return false
+		return false, true
 	}
-	if err := d.Store.Upsert(state.BookState{
-		ASIN:            item.ASIN,
-		Status:          status,
-		PercentComplete: item.PercentComplete,
-		HardcoverBookID: &bookID,
-	}); err != nil {
-		slog.Error("persist synced state", "asin", item.ASIN, "error", err)
-	}
-	return true
+	return true, false
 }

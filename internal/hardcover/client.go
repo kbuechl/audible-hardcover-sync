@@ -446,6 +446,11 @@ type UserBook struct {
 	// AudioSeconds is the length of the entry's edition on Hardcover, which
 	// Hardcover divides progress by to show a percent. 0 when unknown.
 	AudioSeconds int
+	// LastReadDate is the most recent finish date Hardcover has for the
+	// entry, nil when it has none.
+	LastReadDate *time.Time
+	// OpenReadIDs lists the entry's reads that have no finish date.
+	OpenReadIDs []int64
 }
 
 // FetchUserBooks fetches all of the authenticated user's user_books rows
@@ -461,12 +466,16 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 
 	var out struct {
 		UserBooks []struct {
-			ID       int64 `json:"id"`
-			BookID   int64 `json:"book_id"`
-			StatusID int   `json:"status_id"`
-			Edition  *struct {
+			ID           int64   `json:"id"`
+			BookID       int64   `json:"book_id"`
+			StatusID     int     `json:"status_id"`
+			LastReadDate *string `json:"last_read_date"`
+			Edition      *struct {
 				AudioSeconds *int `json:"audio_seconds"`
 			} `json:"edition"`
+			OpenReads []struct {
+				ID int64 `json:"id"`
+			} `json:"open_reads"`
 			UserBookReads []struct {
 				ProgressSeconds *int `json:"progress_seconds"`
 			} `json:"user_book_reads"`
@@ -477,7 +486,9 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 			id
 			book_id
 			status_id
+			last_read_date
 			edition { audio_seconds }
+			open_reads: user_book_reads(where: {finished_at: {_is_null: true}}) { id }
 			user_book_reads(order_by: {id: desc}, limit: 1) {
 				progress_seconds
 			}
@@ -497,12 +508,24 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 		if ub.Edition != nil && ub.Edition.AudioSeconds != nil {
 			audio = *ub.Edition.AudioSeconds
 		}
+		var lastRead *time.Time
+		if ub.LastReadDate != nil {
+			if t, err := time.Parse(dateLayout, *ub.LastReadDate); err == nil {
+				lastRead = &t
+			}
+		}
+		openIDs := make([]int64, 0, len(ub.OpenReads))
+		for _, r := range ub.OpenReads {
+			openIDs = append(openIDs, r.ID)
+		}
 		books[ub.BookID] = UserBook{
 			ID:              ub.ID,
 			BookID:          ub.BookID,
 			StatusID:        ub.StatusID,
 			ProgressSeconds: progress,
 			AudioSeconds:    audio,
+			LastReadDate:    lastRead,
+			OpenReadIDs:     openIDs,
 		}
 	}
 	return books, nil
