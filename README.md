@@ -55,7 +55,9 @@ vendored source and dependencies with their licenses.
   - A rating you set on Hardcover will NOT be overwritten by your Audible
     rating.
   - A finish date you set manually on Hardcover will NOT be overwritten.
-  - The sync only INSERTS new books — it never updates existing ones.
+  - The one exception is listening progress: for a book that is Currently
+    Reading on Hardcover, progress is moved forward to match Audible on each
+    sync. It is never lowered, and nothing else about the entry changes.
 - **New entries get.** When a book is not already on Hardcover, the sync
   inserts it with:
   - Status (Read for finished, Currently Reading for in-progress).
@@ -63,6 +65,8 @@ vendored source and dependencies with their licenses.
     edition with audio duration).
   - The finish date from Audible's listening history (finished books only).
   - Your Audible star rating (if you've rated the book on Audible).
+  - Listening progress (in-progress books), from Audible's percent complete
+    and the audiobook's runtime.
 - **Rate limiting.** Throttled requests (HTTP 429) are retried with
   exponential backoff for read operations (searches, lookups), but
   mutations (inserts/updates) are NOT retried to prevent duplicate

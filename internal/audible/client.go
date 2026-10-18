@@ -36,6 +36,9 @@ type LibraryItem struct {
 	// CoverURL is Audible's cover art (500px, falling back to 1024px).
 	// Empty if Audible returned no product images.
 	CoverURL string
+	// RuntimeSeconds is the audiobook's length, used to turn
+	// PercentComplete into Hardcover's progress_seconds. 0 if unknown.
+	RuntimeSeconds int
 }
 
 // responseGroups extends the SDK's default set (WithResponseGroups replaces
@@ -113,7 +116,10 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 		rating = b.ProvidedReview.Ratings.OverallRating
 	}
 	return LibraryItem{
-		ASIN:            b.ASIN,
+		// Audible's product id is an ISBN for some older titles, which the
+		// SDK files under ISBN10/ISBN13 instead of ASIN. Fall back to it so
+		// every item has a unique key in state.
+		ASIN:            cmp.Or(b.ASIN, b.ISBN10, b.ISBN13, b.OtherID),
 		Title:           b.Title,
 		Author:          author,
 		ISBN10:          b.ISBN10,
@@ -123,6 +129,7 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 		FinishedAt:      parseAudibleTimestamp(b.ListeningStatus.FinishedAtTimestamp),
 		Rating:          rating,
 		CoverURL:        cmp.Or(b.ProductImages.Image500, b.ProductImages.Image1024),
+		RuntimeSeconds:  b.RuntimeMinutes * 60,
 	}
 }
 

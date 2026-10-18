@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,11 @@ const (
 )
 
 const defaultEndpoint = "https://api.hardcover.app/v1/graphql"
+
+// ErrSearchUnavailable means Hardcover's search answered with null results,
+// which it does while its search backend is down. It is distinct from an
+// empty result list so callers don't mistake an outage for "no match".
+var ErrSearchUnavailable = errors.New("hardcover search unavailable")
 
 // fallbackRequestGap spaces out requests only when Hardcover's response
 // carries no RateLimit headers to pace from. Mutations are never retried
@@ -248,8 +254,25 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMat
 			} `json:"book"`
 		} `json:"editions"`
 	}
-	query := `query FindByISBNOrASIN($isbn: String!, $asin: String!) {
-		editions(where: {_or: [{isbn_13: {_eq: $isbn}}, {isbn_10: {_eq: $isbn}}, {asin: {_eq: $asin}}]}, limit: 1) {
+	// Only filter on the identifiers we have: most Audible items carry an
+	// ASIN but no ISBN, and an empty-string filter must never match.
+	var params, filters []string
+	vars := map[string]any{}
+	if isbn != "" {
+		params = append(params, "$isbn: String!")
+		filters = append(filters, "{isbn_13: {_eq: $isbn}}", "{isbn_10: {_eq: $isbn}}")
+		vars["isbn"] = isbn
+	}
+	if asin != "" {
+		params = append(params, "$asin: String!")
+		filters = append(filters, "{asin: {_eq: $asin}}")
+		vars["asin"] = asin
+	}
+	if len(filters) == 0 {
+		return BookMatch{}, false, nil
+	}
+	query := `query FindByISBNOrASIN(` + strings.Join(params, ", ") + `) {
+		editions(where: {_or: [` + strings.Join(filters, ", ") + `]}, limit: 1) {
 			book_id
 			book {
 				default_audio_edition_id
@@ -258,7 +281,7 @@ func (c *Client) FindBookByISBN(ctx context.Context, isbn, asin string) (BookMat
 			}
 		}
 	}`
-	if err := c.do(ctx, query, map[string]any{"isbn": isbn, "asin": asin}, &out); err != nil {
+	if err := c.do(ctx, query, vars, &out); err != nil {
 		return BookMatch{}, false, err
 	}
 	if len(out.Editions) == 0 {
@@ -328,7 +351,7 @@ type SearchResult struct {
 func (c *Client) SearchBooks(ctx context.Context, query string, perPage int) ([]SearchResult, error) {
 	var out struct {
 		Search struct {
-			Results struct {
+			Results *struct {
 				Hits []struct {
 					Document struct {
 						ID          json.Number `json:"id"`
@@ -350,6 +373,9 @@ func (c *Client) SearchBooks(ctx context.Context, query string, perPage int) ([]
 	}`
 	if err := c.do(ctx, gqlQuery, map[string]any{"query": query, "perPage": perPage}, &out); err != nil {
 		return nil, fmt.Errorf("search books: %w", err)
+	}
+	if out.Search.Results == nil {
+		return nil, fmt.Errorf("search books: %w", ErrSearchUnavailable)
 	}
 
 	results := make([]SearchResult, 0, len(out.Search.Results.Hits))
@@ -414,6 +440,12 @@ type UserBook struct {
 	ID       int64
 	BookID   int64
 	StatusID int
+	// ProgressSeconds is the listening progress on the most recent read
+	// record, 0 when there is none or it is unset.
+	ProgressSeconds int
+	// AudioSeconds is the length of the entry's edition on Hardcover, which
+	// Hardcover divides progress by to show a percent. 0 when unknown.
+	AudioSeconds int
 }
 
 // FetchUserBooks fetches all of the authenticated user's user_books rows
@@ -432,6 +464,12 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 			ID       int64 `json:"id"`
 			BookID   int64 `json:"book_id"`
 			StatusID int   `json:"status_id"`
+			Edition  *struct {
+				AudioSeconds *int `json:"audio_seconds"`
+			} `json:"edition"`
+			UserBookReads []struct {
+				ProgressSeconds *int `json:"progress_seconds"`
+			} `json:"user_book_reads"`
 		} `json:"user_books"`
 	}
 	gqlQuery := `query FetchUserBooks($userID: Int!) {
@@ -439,6 +477,10 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 			id
 			book_id
 			status_id
+			edition { audio_seconds }
+			user_book_reads(order_by: {id: desc}, limit: 1) {
+				progress_seconds
+			}
 		}
 	}`
 	if err := c.do(ctx, gqlQuery, map[string]any{"userID": userID}, &out); err != nil {
@@ -447,10 +489,20 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 
 	books := make(map[int64]UserBook, len(out.UserBooks))
 	for _, ub := range out.UserBooks {
+		var progress int
+		if len(ub.UserBookReads) > 0 && ub.UserBookReads[0].ProgressSeconds != nil {
+			progress = *ub.UserBookReads[0].ProgressSeconds
+		}
+		var audio int
+		if ub.Edition != nil && ub.Edition.AudioSeconds != nil {
+			audio = *ub.Edition.AudioSeconds
+		}
 		books[ub.BookID] = UserBook{
-			ID:       ub.ID,
-			BookID:   ub.BookID,
-			StatusID: ub.StatusID,
+			ID:              ub.ID,
+			BookID:          ub.BookID,
+			StatusID:        ub.StatusID,
+			ProgressSeconds: progress,
+			AudioSeconds:    audio,
 		}
 	}
 	return books, nil
@@ -468,7 +520,7 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 //
 // The mutation shape (argument types) was confirmed via live GraphQL
 // introspection against Hardcover's real API on 2026-08-01.
-func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
+func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error) {
 	insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
 		insert_user_book(object: $object) { id }
 	}`
@@ -482,8 +534,13 @@ func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int,
 	if editionID != nil {
 		object["edition_id"] = *editionID
 	}
-	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, nil); err != nil {
-		return fmt.Errorf("insert user_book: %w", err)
+	var out struct {
+		InsertUserBook struct {
+			ID int64 `json:"id"`
+		} `json:"insert_user_book"`
 	}
-	return nil
+	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, &out); err != nil {
+		return 0, fmt.Errorf("insert user_book: %w", err)
+	}
+	return out.InsertUserBook.ID, nil
 }

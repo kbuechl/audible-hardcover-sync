@@ -27,7 +27,8 @@ type HardcoverClient interface {
 	FindDefaultEdition(ctx context.Context, bookID int64) (*int64, error)
 	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
 	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
-	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error
+	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error)
+	SetReadProgress(ctx context.Context, userBookID int64, percent float64, fallbackSeconds int) error
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -106,7 +107,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
-		if prior != nil && !prior.Unmatched && prior.Status == status {
+		if prior != nil && !prior.Unmatched && prior.Status == status && !progressedSince(item, status, prior) {
 			result.Unchanged++
 			continue
 		}
@@ -146,13 +147,18 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		bookID := resolved.BookID
 
 		// If the book is already in the user's Hardcover library (any
-		// status), skip it entirely — never modify an existing entry. This
-		// means a book read in print and marked Read on Hardcover won't be
+		// status), never change its status, rating or dates. This means a
+		// book read in print and marked Read on Hardcover won't be
 		// downgraded when the audiobook is in-progress on Audible, a
 		// manually-set rating won't be overwritten, and a manually-set
-		// finish date won't be clobbered. The sync only INSERTS new books.
-		if _, hasExisting := userBooks[bookID]; hasExisting {
-			result.Unchanged++
+		// finish date won't be clobbered. The one exception is listening
+		// progress on a Currently Reading book, which only moves forward.
+		if existing, hasExisting := userBooks[bookID]; hasExisting {
+			if pushExistingProgress(ctx, d, item, status, existing, bookID) {
+				result.Synced++
+			} else {
+				result.Unchanged++
+			}
 			continue
 		}
 
@@ -165,7 +171,8 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		}
 
 		// New book — insert it with status, edition, date, and rating.
-		if err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID); err != nil {
+		userBookID, err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID)
+		if err != nil {
 			slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
 			result.Errored++
 			if errors.Is(err, hardcover.ErrDailyQuotaExhausted) {
@@ -174,10 +181,22 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
+		// The book itself is on Hardcover now, so a progress failure is
+		// only logged. Recording 0% makes the next sync retry the push.
+		recordedPercent := item.PercentComplete
+		if status == state.StatusInProgress {
+			if secs := progressSeconds(item); secs > 0 {
+				if err := d.Hardcover.SetReadProgress(ctx, userBookID, item.PercentComplete, secs); err != nil {
+					slog.Error("set hardcover progress", "asin", item.ASIN, "book_id", bookID, "error", err)
+					recordedPercent = 0
+				}
+			}
+		}
+
 		if err := d.Store.Upsert(state.BookState{
 			ASIN:            item.ASIN,
 			Status:          status,
-			PercentComplete: item.PercentComplete,
+			PercentComplete: recordedPercent,
 			HardcoverBookID: &bookID,
 		}); err != nil {
 			slog.Error("persist synced state", "asin", item.ASIN, "error", err)
@@ -221,8 +240,10 @@ func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior 
 		return hardcover.BookMatch{BookID: *prior.HardcoverBookID}, nil
 	}
 
-	isbn, ok := matcher.BestISBN(matcher.AudibleItem{ASIN: item.ASIN, ISBN13: item.ISBN13, ISBN10: item.ISBN10})
-	if ok {
+	// Look up by ISBN and/or ASIN exactly. Most Audible items have only
+	// an ASIN, which Hardcover editions also carry.
+	isbn, _ := matcher.BestISBN(matcher.AudibleItem{ASIN: item.ASIN, ISBN13: item.ISBN13, ISBN10: item.ISBN10})
+	if isbn != "" || item.ASIN != "" {
 		// FindBookByISBN returns book_id AND edition_id (preferred audio)
 		// in a single query — no separate FindDefaultEdition call needed.
 		match, found, err := d.Hardcover.FindBookByISBN(ctx, isbn, item.ASIN)
@@ -234,10 +255,9 @@ func resolveBookID(ctx context.Context, d Deps, item audible.LibraryItem, prior 
 		}
 	}
 
-	// No ISBN, or the ISBN wasn't found in Hardcover's catalog (common for
-	// audiobooks, which are frequently catalogued by ASIN with no linked
-	// print/ebook ISBN) — try a confidence-scored fuzzy fallback before
-	// giving up to the manual-match path.
+	// Neither identifier is in Hardcover's catalog — try a
+	// confidence-scored fuzzy fallback before giving up to the manual-match
+	// path.
 	return resolveByFuzzyMatch(ctx, d, item)
 }
 
@@ -274,4 +294,48 @@ func resolveByFuzzyMatch(ctx context.Context, d Deps, item audible.LibraryItem) 
 	// Try to find the audiobook edition for this fuzzy-matched book.
 	editionID, _ := d.Hardcover.FindDefaultEdition(ctx, bookID)
 	return hardcover.BookMatch{BookID: bookID, EditionID: editionID}, nil
+}
+
+// progressSeconds converts Audible's percent complete into seconds using
+// Audible's runtime. It is the fallback when Hardcover's edition has no
+// length. 0 when the runtime is unknown.
+func progressSeconds(item audible.LibraryItem) int {
+	return hardcover.ProgressSecondsFor(item.PercentComplete, item.RuntimeSeconds)
+}
+
+// progressedSince reports whether an in-progress book has moved forward on
+// Audible since the last recorded sync, so its progress should be pushed.
+func progressedSince(item audible.LibraryItem, status state.Status, prior *state.BookState) bool {
+	return status == state.StatusInProgress && item.PercentComplete > prior.PercentComplete
+}
+
+// pushExistingProgress moves progress forward on a book that is already
+// Currently Reading on Hardcover, and records the new percent in state. It
+// never lowers progress and never touches a book in any other status. It
+// reports whether Hardcover was updated.
+func pushExistingProgress(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64) bool {
+	if status != state.StatusInProgress || existing.StatusID != hardcover.StatusCurrentlyReading {
+		return false
+	}
+	// Compare in Hardcover's terms: its edition length when known.
+	target := progressSeconds(item)
+	if existing.AudioSeconds > 0 {
+		target = hardcover.ProgressSecondsFor(item.PercentComplete, existing.AudioSeconds)
+	}
+	if target <= existing.ProgressSeconds {
+		return false
+	}
+	if err := d.Hardcover.SetReadProgress(ctx, existing.ID, item.PercentComplete, progressSeconds(item)); err != nil {
+		slog.Error("set hardcover progress", "asin", item.ASIN, "book_id", bookID, "error", err)
+		return false
+	}
+	if err := d.Store.Upsert(state.BookState{
+		ASIN:            item.ASIN,
+		Status:          status,
+		PercentComplete: item.PercentComplete,
+		HardcoverBookID: &bookID,
+	}); err != nil {
+		slog.Error("persist synced state", "asin", item.ASIN, "error", err)
+	}
+	return true
 }

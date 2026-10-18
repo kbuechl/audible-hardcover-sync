@@ -180,7 +180,7 @@ func TestClient_InsertUserBook(t *testing.T) {
 		}
 	})
 
-	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil); err != nil {
+	if _, err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if !insertCalled {
@@ -336,7 +336,7 @@ func TestClient_InsertUserBook_WithUserDate(t *testing.T) {
 	})
 
 	finishedAt := time.Date(2025, 10, 11, 19, 34, 29, 0, time.UTC)
-	if err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, &finishedAt, nil); err != nil {
+	if _, err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, &finishedAt, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if got := capturedObject["user_date"]; got != "2025-10-11" {
@@ -355,7 +355,7 @@ func TestClient_InsertUserBook_WithoutUserDate(t *testing.T) {
 		return nil, nil
 	})
 
-	if err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil, nil); err != nil {
+	if _, err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil, nil); err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
 	if _, hasDate := capturedObject["user_date"]; hasDate {
@@ -809,7 +809,7 @@ func TestClient_DoesNotRetryMutationsOn429(t *testing.T) {
 	c.endpoint = srv.URL
 	c.httpClient = rc.StandardClient()
 
-	err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil)
+	_, err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil)
 	if err == nil {
 		t.Fatal("InsertUserBook() error = nil, want error for 429 on mutation")
 	}
@@ -842,5 +842,62 @@ func TestClient_PaceRespectsContextCancel(t *testing.T) {
 	cancel()
 	if err := c.pace(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("pace err = %v, want context.Canceled", err)
+	}
+}
+
+func TestClient_SearchBooks_NullResultsIsError(t *testing.T) {
+	// Hardcover returns results: null when its search backend is down.
+	// Treating that as "no matches" sent every book to manual matching.
+	_, c := newTestServer(t, func(string, map[string]any) (any, error) {
+		return map[string]any{"search": map[string]any{"results": nil}}, nil
+	})
+	if _, err := c.SearchBooks(context.Background(), "Project Hail Mary", 5); !errors.Is(err, ErrSearchUnavailable) {
+		t.Fatalf("SearchBooks() error = %v, want ErrSearchUnavailable", err)
+	}
+}
+
+func TestClient_FindBookByISBN_OnlyQueriesProvidedIDs(t *testing.T) {
+	tests := []struct {
+		name, isbn, asin string
+		wantVars         []string
+	}{
+		{name: "asin only", asin: "B08GB58KD5", wantVars: []string{"asin"}},
+		{name: "isbn only", isbn: "9780593135204", wantVars: []string{"isbn"}},
+		{name: "both", isbn: "9780593135204", asin: "B08GB58KD5", wantVars: []string{"asin", "isbn"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+				if fmt.Sprint(len(vars)) != fmt.Sprint(len(tt.wantVars)) {
+					t.Errorf("vars = %v, want only %v", vars, tt.wantVars)
+				}
+				for _, v := range tt.wantVars {
+					if _, ok := vars[v]; !ok {
+						t.Errorf("missing var %q in %v", v, vars)
+					}
+				}
+				if tt.isbn == "" && strings.Contains(query, "isbn_13") {
+					t.Errorf("query filters on isbn with no isbn given: %s", query)
+				}
+				if tt.asin == "" && strings.Contains(query, "asin: {") {
+					t.Errorf("query filters on asin with no asin given: %s", query)
+				}
+				return map[string]any{"editions": []map[string]any{{"book_id": 427578, "book": map[string]any{}}}}, nil
+			})
+			match, found, err := c.FindBookByISBN(context.Background(), tt.isbn, tt.asin)
+			if err != nil || !found || match.BookID != 427578 {
+				t.Fatalf("FindBookByISBN() = %+v, %v, %v", match, found, err)
+			}
+		})
+	}
+}
+
+func TestClient_FindBookByISBN_NoIDs(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		t.Fatalf("no request expected without any id, got %s", query)
+		return nil, nil
+	})
+	if _, found, err := c.FindBookByISBN(context.Background(), "", ""); found || err != nil {
+		t.Fatalf("FindBookByISBN(\"\", \"\") = found %v, err %v; want not found, no error", found, err)
 	}
 }

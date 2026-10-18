@@ -143,3 +143,23 @@ func TestToLibraryItem_CoverURL(t *testing.T) {
 		})
 	}
 }
+
+func TestToLibraryItem_ISBNProductIDUsedAsASIN(t *testing.T) {
+	// Older Audible titles use an ISBN-10 as their product id; the SDK
+	// classifies it as ISBN10 and leaves ASIN empty. The item must still
+	// get a unique key, or every such book collides on asin="" in state.
+	item := toLibraryItem(audiblesdk.Book{ISBN10: "1250245281", Title: "Empire of the Vampire"})
+	if item.ASIN != "1250245281" {
+		t.Errorf("ASIN = %q, want the ISBN-10 product id", item.ASIN)
+	}
+	if item.ISBN10 != "1250245281" {
+		t.Errorf("ISBN10 = %q, want it kept for matching", item.ISBN10)
+	}
+}
+
+func TestToLibraryItem_RuntimeSeconds(t *testing.T) {
+	item := toLibraryItem(audiblesdk.Book{ASIN: "B1", RuntimeMinutes: 924})
+	if item.RuntimeSeconds != 924*60 {
+		t.Errorf("RuntimeSeconds = %d, want %d", item.RuntimeSeconds, 924*60)
+	}
+}

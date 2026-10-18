@@ -34,6 +34,7 @@ type upsertCall struct {
 
 type fakeHardcover struct {
 	byISBN             map[string]int64
+	byASIN             map[string]int64
 	editionByISBN      map[string]int64 // ISBN → edition_id returned by FindBookByISBN
 	searchResults      map[string][]hardcover.SearchResult
 	audioEditionByBook map[int64]int64 // bookID → edition_id returned by FindDefaultEdition
@@ -41,6 +42,9 @@ type fakeHardcover struct {
 	userBooks          map[int64]hardcover.UserBook // pre-seeded cache for FetchUserBooks
 	inserted           map[int64]upsertCall         // bookID → call
 	upsertErr          error
+	progress           map[int64]int // user_book id → progress_seconds set
+	progressErr        error
+	nextUserBookID     int64
 }
 
 func newFakeHardcover() *fakeHardcover {
@@ -51,12 +55,17 @@ func newFakeHardcover() *fakeHardcover {
 		audioEditionByBook: map[int64]int64{},
 		userBooks:          map[int64]hardcover.UserBook{},
 		inserted:           map[int64]upsertCall{},
+		progress:           map[int64]int{},
+		nextUserBookID:     5000,
 	}
 }
 
 func (f *fakeHardcover) FindBookByISBN(ctx context.Context, isbn, asin string) (hardcover.BookMatch, bool, error) {
 	id, ok := f.byISBN[isbn]
-	if !ok {
+	if !ok || isbn == "" {
+		if aid, aok := f.byASIN[asin]; aok && asin != "" {
+			return hardcover.BookMatch{BookID: aid}, true, nil
+		}
 		return hardcover.BookMatch{}, false, nil
 	}
 	var editionID *int64
@@ -88,11 +97,20 @@ func (f *fakeHardcover) FindDefaultEdition(ctx context.Context, bookID int64) (*
 	return nil, nil // tests don't need edition resolution
 }
 
-func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) error {
+func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error) {
 	if f.upsertErr != nil {
-		return f.upsertErr
+		return 0, f.upsertErr
 	}
 	f.inserted[bookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
+	f.nextUserBookID++
+	return f.nextUserBookID, nil
+}
+
+func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, percent float64, fallbackSeconds int) error {
+	if f.progressErr != nil {
+		return f.progressErr
+	}
+	f.progress[userBookID] = fallbackSeconds
 	return nil
 }
 
@@ -660,5 +678,165 @@ func TestRun_UnmatchedStoresAudibleCover(t *testing.T) {
 	}
 	if !got.Unmatched || got.CoverURL != "https://m.media-amazon.com/500.jpg" {
 		t.Errorf("got Unmatched=%v CoverURL=%q, want unmatched with Audible cover", got.Unmatched, got.CoverURL)
+	}
+}
+
+func TestRun_Progress(t *testing.T) {
+	const isbn = "9780641723445"
+	const runtime = 10000 // seconds
+	inProgress := func(pct float64) audible.LibraryItem {
+		return audible.LibraryItem{ASIN: "A1", ISBN13: isbn, PercentComplete: pct, RuntimeSeconds: runtime}
+	}
+
+	tests := []struct {
+		name         string
+		item         audible.LibraryItem
+		existing     *hardcover.UserBook // already on Hardcover
+		prior        *state.BookState
+		wantProgress map[int64]int
+		wantResult   Result
+	}{
+		{
+			name:         "new in-progress book gets progress after insert",
+			item:         inProgress(56),
+			wantProgress: map[int64]int{5001: 5600},
+			wantResult:   Result{Synced: 1},
+		},
+		{
+			name:         "new book without runtime gets no progress",
+			item:         audible.LibraryItem{ASIN: "A1", ISBN13: isbn, PercentComplete: 56},
+			wantProgress: map[int64]int{},
+			wantResult:   Result{Synced: 1},
+		},
+		{
+			name:         "existing currently-reading book moves forward",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusCurrentlyReading, ProgressSeconds: 1000},
+			wantProgress: map[int64]int{200: 5600},
+			wantResult:   Result{Synced: 1},
+		},
+		{
+			name:         "existing progress further along is never lowered",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusCurrentlyReading, ProgressSeconds: 9000},
+			wantProgress: map[int64]int{},
+			wantResult:   Result{Unchanged: 1},
+		},
+		{
+			name:         "existing Read book is not touched",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusRead},
+			wantProgress: map[int64]int{},
+			wantResult:   Result{Unchanged: 1},
+		},
+		{
+			name:         "same percent as last sync is skipped",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusCurrentlyReading, ProgressSeconds: 1000},
+			prior:        &state.BookState{ASIN: "A1", Status: state.StatusInProgress, PercentComplete: 56, HardcoverBookID: int64Ptr(777)},
+			wantProgress: map[int64]int{},
+			wantResult:   Result{Unchanged: 1},
+		},
+		{
+			name:         "forward check uses Hardcover edition length",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusCurrentlyReading, ProgressSeconds: 6000, AudioSeconds: 20000},
+			wantProgress: map[int64]int{200: 5600}, // 56% of 20000 = 11200 > 6000
+			wantResult:   Result{Synced: 1},
+		},
+		{
+			name:         "higher percent than last sync is pushed",
+			item:         inProgress(70),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusCurrentlyReading, ProgressSeconds: 5600},
+			prior:        &state.BookState{ASIN: "A1", Status: state.StatusInProgress, PercentComplete: 56, HardcoverBookID: int64Ptr(777)},
+			wantProgress: map[int64]int{200: 7000},
+			wantResult:   Result{Synced: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fh := newFakeHardcover()
+			fh.byISBN[isbn] = 777
+			if tt.existing != nil {
+				fh.userBooks[777] = *tt.existing
+			}
+			store := newTestStore(t)
+			if tt.prior != nil {
+				if err := store.Upsert(*tt.prior); err != nil {
+					t.Fatalf("seed prior: %v", err)
+				}
+			}
+
+			result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{tt.item}}, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result != tt.wantResult {
+				t.Errorf("result = %+v, want %+v", result, tt.wantResult)
+			}
+			if fmt.Sprint(fh.progress) != fmt.Sprint(tt.wantProgress) {
+				t.Errorf("progress calls = %v, want %v", fh.progress, tt.wantProgress)
+			}
+		})
+	}
+}
+
+func TestRun_ProgressFailureStillRecordsInsert(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byISBN["9780641723445"] = 777
+	fh.progressErr = errors.New("hardcover down")
+	store := newTestStore(t)
+	item := audible.LibraryItem{ASIN: "A1", ISBN13: "9780641723445", PercentComplete: 56, RuntimeSeconds: 10000}
+
+	result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{item}}, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Synced != 1 {
+		t.Errorf("Synced = %d, want 1 (the insert succeeded)", result.Synced)
+	}
+	got, _ := store.Get("A1")
+	if got == nil || got.HardcoverBookID == nil {
+		t.Fatalf("state not recorded after insert: %+v", got)
+	}
+	// Percent is stored as 0 so the next sync retries the progress push.
+	if got.PercentComplete != 0 {
+		t.Errorf("PercentComplete = %v, want 0 so progress is retried", got.PercentComplete)
+	}
+}
+
+func TestRun_ASINOnlyItemUsesExactLookup(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"B08GB58KD5": 427578}
+	fh.searchErr = errors.New("search must not be needed")
+	item := audible.LibraryItem{ASIN: "B08GB58KD5", Title: "Project Hail Mary", IsFinished: true, PercentComplete: 100}
+
+	result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{item}}, Hardcover: fh, Store: newTestStore(t), Notifier: &fakeNotifier{}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Synced != 1 {
+		t.Fatalf("result = %+v, want Synced=1 via exact ASIN lookup", result)
+	}
+	if _, ok := fh.inserted[427578]; !ok {
+		t.Errorf("inserted = %v, want book 427578", fh.inserted)
+	}
+}
+
+func TestRun_SearchUnavailableIsErrorNotUnmatched(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.searchErr = fmt.Errorf("search books: %w", hardcover.ErrSearchUnavailable)
+	store := newTestStore(t)
+	item := audible.LibraryItem{ASIN: "B000000001", Title: "Nowhere", IsFinished: true, PercentComplete: 100}
+
+	result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{item}}, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Unmatched != 0 || result.Errored != 1 {
+		t.Errorf("result = %+v, want Errored=1 Unmatched=0 so the book retries next sync", result)
+	}
+	if got, _ := store.Get("B000000001"); got != nil {
+		t.Errorf("state = %+v, want nothing recorded", got)
 	}
 }
