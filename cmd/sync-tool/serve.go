@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	gosync "sync"
 	"time"
 
 	audiblesdk "github.com/mstrhakr/go-audible"
@@ -75,16 +76,29 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 
-	c := cron.New()
-	spec := fmt.Sprintf("@every %s", cfg.SyncInterval)
-	if _, err := c.AddFunc(spec, func() {
+	// running keeps the startup sync and a scheduled one (or two slow
+	// scheduled ones) from overlapping; a sync that finds one in progress
+	// is skipped.
+	var running gosync.Mutex
+	syncNow := func() {
+		if !running.TryLock() {
+			slog.Info("sync already running, skipping")
+			return
+		}
+		defer running.Unlock()
 		if _, err := runOnce(ctx, cfg); err != nil {
 			slog.Error("scheduled sync failed", "error", err)
 		}
-	}); err != nil {
+	}
+
+	c := cron.New()
+	spec := fmt.Sprintf("@every %s", cfg.SyncInterval)
+	if _, err := c.AddFunc(spec, syncNow); err != nil {
 		return fmt.Errorf("schedule sync: %w", err)
 	}
 	c.Start()
+	// Sync once at startup instead of waiting a full interval.
+	go syncNow()
 	defer c.Stop()
 
 	<-ctx.Done()
