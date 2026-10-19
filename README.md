@@ -8,9 +8,6 @@ books that can't be matched automatically show up on a manual-match
 web page, with optional notifications (Slack/Discord/email/etc via
 shoutrrr) when that happens.
 
-See `docs/superpowers/specs/2026-07-23-audible-hardcover-sync-design.md`
-for the full design.
-
 ## Setup
 
 1. Get a Hardcover API token from your account settings page.
@@ -34,6 +31,10 @@ for the full design.
 
 The manual-match web UI has no authentication. It's meant for a LAN/VPN
 trust boundary only — don't port-forward `WEB_UI_PORT` to the internet.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Third-party licenses
 

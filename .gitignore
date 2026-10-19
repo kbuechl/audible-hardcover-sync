@@ -2,3 +2,4 @@
 .superpowers/
 .env
 cmd/sync-tool/sync-tool
+docs/
