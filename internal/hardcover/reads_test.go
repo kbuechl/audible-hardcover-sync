@@ -81,3 +81,24 @@ func TestClient_FetchUserBooks_LastReadDate(t *testing.T) {
 		t.Errorf("books[999].LastReadDate = %v, want nil", books[999].LastReadDate)
 	}
 }
+
+func TestClient_ClearFinishDate(t *testing.T) {
+	cleared := false
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "update_user_book_read") {
+			obj := vars["object"].(map[string]any)
+			if v, ok := obj["finished_at"]; !ok || v != nil || vars["id"] != float64(7244600) {
+				t.Errorf("update vars = %v, want finished_at null on read 7244600", vars)
+			}
+			cleared = true
+			return map[string]any{"update_user_book_read": map[string]any{"id": 7244600, "error": nil}}, nil
+		}
+		return map[string]any{"user_book_reads": []map[string]any{{"id": 7244600}}, "user_books": []map[string]any{}}, nil
+	})
+	if err := c.ClearFinishDate(context.Background(), 19742017); err != nil {
+		t.Fatalf("ClearFinishDate() error = %v", err)
+	}
+	if !cleared {
+		t.Error("finish date was not cleared")
+	}
+}

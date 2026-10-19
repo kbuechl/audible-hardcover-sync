@@ -193,3 +193,25 @@ func TestRelisten_ReadClosedElsewhereIsDropped(t *testing.T) {
 		t.Errorf("RelistenReadID = %v, want cleared", *got.RelistenReadID)
 	}
 }
+
+func TestRun_FinishedWithoutDateClearsHardcoverDate(t *testing.T) {
+	tests := []struct {
+		name        string
+		item        audible.LibraryItem
+		wantCleared int
+	}{
+		{"finished without a date", audible.LibraryItem{ASIN: "A1", ISBN13: relistenISBN, IsFinished: true, PercentComplete: 17}, 1},
+		{"finished with a date", audible.LibraryItem{ASIN: "A1", ISBN13: relistenISBN, IsFinished: true, PercentComplete: 100, FinishedAt: ptrTime("2026-06-27T00:00:00Z")}, 0},
+		{"in progress", audible.LibraryItem{ASIN: "A1", ISBN13: relistenISBN, PercentComplete: 17}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fh := newFakeHardcover()
+			fh.byISBN[relistenISBN] = 777
+			runOnce(t, &fakeAudible{items: []audible.LibraryItem{tt.item}}, fh, newTestStore(t))
+			if len(fh.clearedDates) != tt.wantCleared {
+				t.Errorf("ClearFinishDate calls = %v, want %d", fh.clearedDates, tt.wantCleared)
+			}
+		})
+	}
+}

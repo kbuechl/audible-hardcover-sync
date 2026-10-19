@@ -74,3 +74,14 @@ func (c *Client) updateRead(ctx context.Context, readID int64, object map[string
 	}
 	return out.Result.err("update user_book_read")
 }
+
+// ClearFinishDate removes the finish date from a user_book's newest read.
+// Hardcover fills in today's date when a book is added as Read without
+// one, which is wrong for a book whose finish date is unknown.
+func (c *Client) ClearFinishDate(ctx context.Context, userBookID int64) error {
+	readID, _, err := c.latestRead(ctx, userBookID)
+	if err != nil || readID == 0 {
+		return err
+	}
+	return c.updateRead(ctx, readID, map[string]any{"finished_at": nil})
+}

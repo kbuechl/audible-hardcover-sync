@@ -46,6 +46,7 @@ type fakeHardcover struct {
 	progressErr        error
 	nextUserBookID     int64
 	reads              map[int64]*fakeRead // read id → read opened by StartRead
+	clearedDates       []int64             // user_book ids passed to ClearFinishDate
 	nextReadID         int64
 }
 
@@ -154,6 +155,11 @@ func (f *fakeHardcover) UpdateReadProgress(ctx context.Context, readID int64, pr
 
 func (f *fakeHardcover) FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error {
 	f.reads[readID].finishedAt = &finishedAt
+	return nil
+}
+
+func (f *fakeHardcover) ClearFinishDate(ctx context.Context, userBookID int64) error {
+	f.clearedDates = append(f.clearedDates, userBookID)
 	return nil
 }
 
