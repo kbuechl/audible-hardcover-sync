@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	gosync "sync"
@@ -27,8 +29,12 @@ import (
 // opens the state store, and delegates to sync.Run.
 func runOnce(ctx context.Context, cfg config.Config) (syncpkg.Result, error) {
 	audibleClient := audible.New(audiblesdk.MarketplaceUS)
+	audibleClient.SetCredentialsKey(cfg.CredentialsKey)
 	if err := audibleClient.LoadCredentialsFile(cfg.CredentialsPath); err != nil {
-		return syncpkg.Result{}, fmt.Errorf("load audible credentials (run 'sync-tool auth' first): %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return syncpkg.Result{}, fmt.Errorf("load audible credentials (run 'sync-tool auth' first): %w", err)
+		}
+		return syncpkg.Result{}, fmt.Errorf("load audible credentials: %w", err)
 	}
 
 	store, err := state.Open(cfg.StateDBPath)

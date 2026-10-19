@@ -31,8 +31,7 @@ func TestLoad(t *testing.T) {
 			env: map[string]string{
 				"HARDCOVER_API_TOKEN": "test-token",
 				"SYNC_INTERVAL":       "30m",
-				"STATE_DB_PATH":       "/tmp/x.db",
-				"CREDENTIALS_PATH":    "/tmp/creds.json",
+				"DATA_DIR":            "/tmp/ahs",
 				"WEB_UI_PORT":         "9090",
 				"PUBLIC_URL":          "http://homeserver.local:9090",
 				"NOTIFY_URLS":         "discord://token@id,mailto://user:pass@smtp.example.com",
@@ -41,8 +40,8 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				HardcoverAPIToken: "test-token",
 				SyncInterval:      30 * time.Minute,
-				StateDBPath:       "/tmp/x.db",
-				CredentialsPath:   "/tmp/creds.json",
+				StateDBPath:       "/tmp/ahs/state.db",
+				CredentialsPath:   "/tmp/ahs/credentials.json",
 				WebUIPort:         "9090",
 				PublicURL:         "http://homeserver.local:9090",
 				NotifyURLs:        []string{"discord://token@id", "mailto://user:pass@smtp.example.com"},
@@ -179,7 +178,7 @@ func TestLoad(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"HARDCOVER_API_TOKEN", "SYNC_INTERVAL", "STATE_DB_PATH", "CREDENTIALS_PATH", "WEB_UI_PORT", "PUBLIC_URL", "NOTIFY_URLS", "MATCH_CONFIDENCE"} {
+			for _, k := range []string{"HARDCOVER_API_TOKEN", "SYNC_INTERVAL", "DATA_DIR", "WEB_UI_PORT", "PUBLIC_URL", "NOTIFY_URLS", "MATCH_CONFIDENCE"} {
 				t.Setenv(k, tt.env[k]) // empty string for unset keys, which clears any inherited value
 			}
 			got, err := Load()

@@ -49,10 +49,18 @@ var responseGroups = slices.Concat(audiblesdk.DefaultResponseGroups, []string{
 
 type Client struct {
 	sdk *audiblesdk.Client
+	// credentialsKey, when set, encrypts the credentials file at rest.
+	credentialsKey string
 }
 
 func New(marketplace audiblesdk.Marketplace) *Client {
 	return &Client{sdk: audiblesdk.NewClient(marketplace)}
+}
+
+// SetCredentialsKey makes LoadCredentialsFile and SaveCredentialsFile
+// encrypt the credentials file with key. An empty key stores plain JSON.
+func (c *Client) SetCredentialsKey(key string) {
+	c.credentialsKey = key
 }
 
 func (c *Client) IsAuthenticated() bool {
@@ -71,13 +79,31 @@ func (c *Client) Authenticate(ctx context.Context, req audiblesdk.DeviceRegistra
 // SaveCredentialsFile. The SDK's own LoadCredentials/SaveCredentials methods
 // are unimplemented placeholders (see its README), so this project persists
 // credentials itself via Marshal/UnmarshalCredentials.
+//
+// An encrypted file needs the key set with SetCredentialsKey. A plain file
+// read while a key is set is rewritten encrypted, so turning on encryption
+// doesn't require logging in again.
 func (c *Client) LoadCredentialsFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read credentials file: %w", err)
 	}
+	encrypted := isEncrypted(data)
+	if encrypted {
+		if c.credentialsKey == "" {
+			return ErrCredentialsKeyRequired
+		}
+		if data, err = openCredentials(data, c.credentialsKey); err != nil {
+			return err
+		}
+	}
 	if err := c.sdk.UnmarshalCredentials(data); err != nil {
 		return fmt.Errorf("unmarshal credentials: %w", err)
+	}
+	if !encrypted && c.credentialsKey != "" {
+		if err := c.SaveCredentialsFile(path); err != nil {
+			return fmt.Errorf("encrypt existing credentials file: %w", err)
+		}
 	}
 	return nil
 }
@@ -87,8 +113,19 @@ func (c *Client) SaveCredentialsFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal credentials: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if c.credentialsKey != "" {
+		if data, err = sealCredentials(data, c.credentialsKey); err != nil {
+			return fmt.Errorf("encrypt credentials: %w", err)
+		}
+	}
+	// Write to a temp file and rename, so a crash can't leave a half-written
+	// file in place of working credentials.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write credentials file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("replace credentials file: %w", err)
 	}
 	return nil
 }

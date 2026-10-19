@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,10 +14,12 @@ type Config struct {
 	SyncInterval      time.Duration
 	StateDBPath       string
 	CredentialsPath   string
-	WebUIPort         string
-	PublicURL         string
-	NotifyURLs        []string
-	MatchConfidence   float64
+	// CredentialsKey encrypts the Audible credentials file when set.
+	CredentialsKey  string
+	WebUIPort       string
+	PublicURL       string
+	NotifyURLs      []string
+	MatchConfidence float64
 }
 
 func Load() (Config, error) {
@@ -34,8 +37,9 @@ func Load() (Config, error) {
 		interval = d
 	}
 
-	stateDBPath := EnvOrDefault("STATE_DB_PATH", "/data/state.db")
-	credentialsPath := EnvOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
+	dataDir := DataDir()
+	stateDBPath := filepath.Join(dataDir, "state.db")
+	credentialsPath := CredentialsPath()
 	webUIPort := EnvOrDefault("WEB_UI_PORT", "8080")
 	publicURL := os.Getenv("PUBLIC_URL")
 
@@ -59,6 +63,7 @@ func Load() (Config, error) {
 		SyncInterval:      interval,
 		StateDBPath:       stateDBPath,
 		CredentialsPath:   credentialsPath,
+		CredentialsKey:    os.Getenv("CREDENTIALS_KEY"),
 		WebUIPort:         webUIPort,
 		PublicURL:         publicURL,
 		NotifyURLs:        notifyURLs,
@@ -91,6 +96,17 @@ func parseMatchConfidence(v string) (float64, error) {
 		return 0, fmt.Errorf("MATCH_CONFIDENCE %q is out of range [0,1] (use a preset name or a value between 0 and 1)", v)
 	}
 	return f, nil
+}
+
+// DataDir is where the state database and Audible credentials live:
+// DATA_DIR, or /data (the container's volume) when unset.
+func DataDir() string {
+	return EnvOrDefault("DATA_DIR", "/data")
+}
+
+// CredentialsPath is the Audible credentials file inside DataDir.
+func CredentialsPath() string {
+	return filepath.Join(DataDir(), "credentials.json")
 }
 
 // EnvOrDefault returns the value of the environment variable key, or def

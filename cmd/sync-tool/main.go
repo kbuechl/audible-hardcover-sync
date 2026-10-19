@@ -21,8 +21,9 @@ func main() {
 
 	switch os.Args[1] {
 	case "auth":
-		credentialsPath := config.EnvOrDefault("CREDENTIALS_PATH", "/data/credentials.json")
+		credentialsPath := config.CredentialsPath()
 		client := audible.New(audiblesdk.MarketplaceUS)
+		client.SetCredentialsKey(os.Getenv("CREDENTIALS_KEY"))
 		if err := runAuth(ctx, client, credentialsPath, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "auth failed:", err)
 			os.Exit(1)

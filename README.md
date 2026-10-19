@@ -88,9 +88,31 @@ Set in `.env` (or the service's `environment`).
 | `SYNC_INTERVAL` | no | `6h` | Time between syncs, e.g. `30m`, `1h`. |
 | `NOTIFY_URLS` | no | | Comma-separated [shoutrrr](https://containrrr.dev/shoutrrr/) URLs, notified when books can't be matched. |
 | `MATCH_CONFIDENCE` | no | `strict` | Fuzzy title/author match threshold: `strict` (0.95), `medium` (0.75), `loose` (0.55), or a number. |
-| `WEB_UI_PORT` | no | `8080` | Port the web UI listens on inside the container. |
-| `STATE_DB_PATH` | no | `/data/state.db` | Sync state database. |
-| `CREDENTIALS_PATH` | no | `/data/credentials.json` | Saved Audible login. |
+| `CREDENTIALS_KEY` | no | | Opt-in: a passphrase that encrypts the saved Audible login (AES-256-GCM). See [Credentials](#credentials). |
+
+Everything the tool saves (`state.db` and `credentials.json`) goes in the
+`/data` volume. To change the web UI's port, change the host side of the
+port mapping (e.g. `9000:8080`).
+
+Running the binary outside Docker? `DATA_DIR` (default `/data`) and
+`WEB_UI_PORT` (default `8080`) set the data folder and listen port.
+
+## Credentials
+
+`auth` registers this tool as an Audible device and saves that device's
+tokens to `/data/credentials.json` (owner-only permissions). It doesn't store
+your Amazon password, but anyone with the file can use your Audible
+account as that device.
+
+- **Plain by default.** Without `CREDENTIALS_KEY` the file is JSON.
+- **Opt-in encryption.** Set `CREDENTIALS_KEY` to any long passphrase
+  (e.g. `openssl rand -base64 32`). The file is encrypted on the next
+  `auth` or sync; an existing plain file is converted automatically, no
+  new login needed. This mostly protects copies of the data folder, like
+  backups, so keep the key somewhere other than that folder.
+- **Lost the key?** Delete the credentials file and run `auth` again.
+- **File leaked?** Deregister the device on Amazon (Manage Your Content
+  and Devices → Devices), then run `auth` again.
 
 ## Commands
 

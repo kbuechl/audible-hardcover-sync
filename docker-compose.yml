@@ -12,9 +12,7 @@ services:
       PUBLIC_URL: ${PUBLIC_URL}
       NOTIFY_URLS: ${NOTIFY_URLS:-}
       MATCH_CONFIDENCE: ${MATCH_CONFIDENCE:-strict}
-      WEB_UI_PORT: 8080
-      STATE_DB_PATH: /data/state.db
-      CREDENTIALS_PATH: /data/credentials.json
+      CREDENTIALS_KEY: ${CREDENTIALS_KEY:-}
     volumes:
       - sync-data:/data
     ports:
