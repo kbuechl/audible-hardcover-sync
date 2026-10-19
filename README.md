@@ -10,6 +10,12 @@ shoutrrr) when that happens.
 
 ## Setup
 
+The image is published to GitHub Container Registry for amd64 and arm64:
+`ghcr.io/kbuechl/audible-hardcover-sync:latest`. You only need
+`docker-compose.yml` and `.env.example` from this repo; `docker compose`
+pulls the image. To build from source instead, run
+`docker compose up -d --build`.
+
 1. Get a Hardcover API token from your account settings page.
 2. Copy `.env.example` to `.env` and fill in `HARDCOVER_API_TOKEN`,
    `PUBLIC_URL` (e.g. `http://192.168.1.10:8080`), and optionally

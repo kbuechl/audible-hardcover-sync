@@ -1,6 +1,9 @@
 # docker-compose.yml
 services:
   sync-tool:
+    image: ghcr.io/kbuechl/audible-hardcover-sync:latest
+    # Remove `build` to always use the published image; with it, `docker
+    # compose up --build` builds from this checkout instead.
     build: .
     restart: unless-stopped
     environment:
