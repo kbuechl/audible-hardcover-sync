@@ -31,7 +31,7 @@ func TestRunOnce_Errors(t *testing.T) {
 					CredentialsPath:   filepath.Join(dir, "does-not-exist.json"),
 				}
 			},
-			wantErrText: "load audible credentials",
+			wantErrText: "Audible isn't connected",
 		},
 		{
 			name: "invalid credentials file contents",

@@ -7,11 +7,7 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN}
-      SYNC_INTERVAL: ${SYNC_INTERVAL:-6h}
-      PUBLIC_URL: ${PUBLIC_URL}
-      NOTIFY_URLS: ${NOTIFY_URLS:-}
-      MATCH_CONFIDENCE: ${MATCH_CONFIDENCE:-strict}
+      HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN:-}
       CREDENTIALS_KEY: ${CREDENTIALS_KEY:-}
     volumes:
       - sync-data:/data

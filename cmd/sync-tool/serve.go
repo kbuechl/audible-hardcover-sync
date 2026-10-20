@@ -5,75 +5,56 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
-	gosync "sync"
 	"time"
 
-	audiblesdk "github.com/mstrhakr/go-audible"
-	"github.com/robfig/cron/v3"
-
-	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
+	"github.com/kbuechl/audible-hardcover-sync/internal/app"
 	"github.com/kbuechl/audible-hardcover-sync/internal/config"
-	"github.com/kbuechl/audible-hardcover-sync/internal/hardcover"
-	"github.com/kbuechl/audible-hardcover-sync/internal/notify"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
-	syncpkg "github.com/kbuechl/audible-hardcover-sync/internal/sync"
 	"github.com/kbuechl/audible-hardcover-sync/internal/webui"
 )
 
-// runOnce performs a single sync pass, wiring together the Audible client,
-// Hardcover client, state store, and notifier. It loads Audible credentials
-// from cfg.CredentialsPath (written previously by the "auth" subcommand),
-// opens the state store, and delegates to sync.Run.
-func runOnce(ctx context.Context, cfg config.Config) (syncpkg.Result, error) {
-	audibleClient := audible.New(audiblesdk.MarketplaceUS)
-	audibleClient.SetCredentialsKey(cfg.CredentialsKey)
-	if err := audibleClient.LoadCredentialsFile(cfg.CredentialsPath); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return syncpkg.Result{}, fmt.Errorf("load audible credentials (run 'sync-tool auth' first): %w", err)
-		}
-		return syncpkg.Result{}, fmt.Errorf("load audible credentials: %w", err)
-	}
-
+// openApp opens the state store and builds the App around it. The caller
+// closes the returned store.
+func openApp(cfg config.Config) (*app.App, *state.Store, error) {
 	store, err := state.Open(cfg.StateDBPath)
 	if err != nil {
-		return syncpkg.Result{}, fmt.Errorf("open state store: %w", err)
+		return nil, nil, fmt.Errorf("open state store: %w", err)
 	}
-	defer store.Close()
-
-	hc := hardcover.New(cfg.HardcoverAPIToken)
-	notifier := notify.New(cfg.NotifyURLs, cfg.PublicURL)
-
-	result, err := syncpkg.Run(ctx, syncpkg.Deps{
-		Audible:         audibleClient,
-		Hardcover:       hc,
-		Store:           store,
-		Notifier:        notifier,
-		MatchConfidence: cfg.MatchConfidence,
-	})
+	a, err := app.New(cfg, store)
 	if err != nil {
-		return result, err
+		store.Close()
+		return nil, nil, err
 	}
-
-	slog.Info("sync complete", "synced", result.Synced, "unchanged", result.Unchanged,
-		"unmatched", result.Unmatched, "errored", result.Errored)
-	return result, nil
+	return a, store, nil
 }
 
-// runServe starts the web UI HTTP server and schedules runOnce on a cron
-// interval (cfg.SyncInterval), blocking until ctx is cancelled. On
-// cancellation it shuts down the HTTP server cleanly and returns ctx.Err().
-func runServe(ctx context.Context, cfg config.Config) error {
-	store, err := state.Open(cfg.StateDBPath)
+// runOnce performs a single sync pass (the "sync" subcommand).
+func runOnce(ctx context.Context, cfg config.Config) (state.SyncReport, error) {
+	a, store, err := openApp(cfg)
 	if err != nil {
-		return fmt.Errorf("open state store: %w", err)
+		return state.SyncReport{}, err
+	}
+	defer store.Close()
+	return a.Sync(ctx)
+}
+
+// runServe starts the web UI and runs a sync at startup and then every
+// sync interval (a web UI setting), blocking until ctx is cancelled. On cancellation it
+// shuts down the HTTP server cleanly and returns ctx.Err().
+func runServe(ctx context.Context, cfg config.Config) error {
+	a, store, err := openApp(cfg)
+	if err != nil {
+		return err
 	}
 	defer store.Close()
 
-	hc := hardcover.New(cfg.HardcoverAPIToken)
-	webServer := webui.New(store, hc)
+	var searcher webui.HardcoverSearcher
+	if hc := a.Hardcover(); hc != nil {
+		searcher = hc
+	}
+	webServer := webui.New(store, searcher).WithService(a, ctx, app.TestNotifyURL)
 
 	httpServer := &http.Server{Addr: ":" + cfg.WebUIPort, Handler: webServer.Handler()}
 	go func() {
@@ -82,34 +63,43 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 
-	// running keeps the startup sync and a scheduled one (or two slow
-	// scheduled ones) from overlapping; a sync that finds one in progress
-	// is skipped.
-	var running gosync.Mutex
 	syncNow := func() {
-		if !running.TryLock() {
+		_, err := a.Sync(ctx)
+		switch {
+		case errors.Is(err, app.ErrSyncRunning):
 			slog.Info("sync already running, skipping")
-			return
-		}
-		defer running.Unlock()
-		if _, err := runOnce(ctx, cfg); err != nil {
+		case errors.Is(err, app.ErrNotConnected):
+			slog.Info("skipping sync until setup is finished in the web UI", "reason", err)
+		case err != nil:
 			slog.Error("scheduled sync failed", "error", err)
 		}
 	}
 
-	c := cron.New()
-	spec := fmt.Sprintf("@every %s", cfg.SyncInterval)
-	if _, err := c.AddFunc(spec, syncNow); err != nil {
-		return fmt.Errorf("schedule sync: %w", err)
-	}
-	c.Start()
 	// Sync once at startup instead of waiting a full interval.
 	go syncNow()
-	defer c.Stop()
+	schedule(ctx, a.SyncInterval, a.PreferencesChanged(), func() { go syncNow() })
 
-	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
 	return ctx.Err()
+}
+
+// schedule calls run every interval() until ctx is cancelled. A signal on
+// changed restarts the wait with the current interval, so a new interval
+// takes effect without a restart.
+func schedule(ctx context.Context, interval func() time.Duration, changed <-chan struct{}, run func()) {
+	timer := time.NewTimer(interval())
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			run()
+			timer.Reset(interval())
+		case <-changed:
+			timer.Reset(interval())
+		}
+	}
 }
