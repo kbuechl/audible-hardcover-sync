@@ -195,6 +195,11 @@ Images are tagged `latest` (the `master` branch), `sha-<commit>`, and a
 version (`1.2.3`, `1.2`) for each release. Pin a version tag for
 predictable updates.
 
+Not using Docker? Each [release](https://github.com/kbuechl/audible-hardcover-sync/releases)
+also has `sync-tool` binaries for Linux, macOS and Windows (amd64 and
+arm64). Run `sync-tool serve`, with `DATA_DIR` pointing at a writable
+folder.
+
 ## Troubleshooting
 
 - **`skipping sync until setup is finished`** in the logs: Audible or
@@ -257,6 +262,9 @@ cd internal/webui/frontend && npm ci && npm test   # web UI
 npm run build                                  # rebuild the embedded UI (commit dist/)
 npm run screenshots                            # regenerate the README screenshots
 ```
+
+Releases: push a `v1.2.3` tag. GoReleaser publishes the binaries and
+changelog, and the image workflow pushes the matching version tags.
 
 The screenshots use made-up data (public-domain books, placeholder
 accounts) served by a mocked API, so no real library ever ends up in the

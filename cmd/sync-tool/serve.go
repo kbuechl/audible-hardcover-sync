@@ -49,6 +49,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	defer store.Close()
+	slog.Info("starting audible-hardcover-sync", "version", version, "port", cfg.WebUIPort)
 
 	var searcher webui.HardcoverSearcher
 	if hc := a.Hardcover(); hc != nil {

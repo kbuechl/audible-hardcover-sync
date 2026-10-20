@@ -1,0 +1,57 @@
+# Release binaries for each v* tag. Container images are built by
+# .github/workflows/docker.yml. The web UI is embedded from the committed
+# internal/webui/frontend/dist, so no Node step is needed here.
+version: 2
+
+project_name: audible-hardcover-sync
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: sync-tool
+    main: ./cmd/sync-tool
+    binary: sync-tool
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - THIRD_PARTY_LICENSES.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore\(deps\)'
+
+release:
+  footer: |
+    Container image: `ghcr.io/kbuechl/audible-hardcover-sync:{{ .Version }}`

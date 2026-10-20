@@ -11,9 +11,12 @@ import (
 	"github.com/kbuechl/audible-hardcover-sync/internal/config"
 )
 
+// version is set at build time (-ldflags "-X main.version=1.2.3").
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve>")
+		fmt.Fprintln(os.Stderr, "usage: sync-tool <auth|sync|serve|version>")
 		os.Exit(1)
 	}
 
@@ -48,6 +51,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "serve failed:", err)
 			os.Exit(1)
 		}
+	case "version", "--version":
+		fmt.Println(version)
 	default:
 		fmt.Fprintln(os.Stderr, "unknown subcommand:", os.Args[1])
 		os.Exit(1)
