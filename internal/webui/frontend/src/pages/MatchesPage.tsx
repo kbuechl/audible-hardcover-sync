@@ -14,13 +14,15 @@ interface MatchesPageProps {
 export default function MatchesPage({ status = null, onSyncStarted = () => {} }: MatchesPageProps) {
   const [books, setBooks] = useState<UnmatchedBook[]>([])
   const [selectedAsin, setSelectedAsin] = useState<string | null>(null)
-  const [selectedBook, setSelectedBook] = useState<UnmatchedBook | null>(null)
+  const [fetchedBook, setFetchedBook] = useState<UnmatchedBook | null>(null)
   const [loading, setLoading] = useState(true)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const hideToast = useCallback(() => setToast(null), [])
   const panelRef = useRef<HTMLDivElement>(null)
+  // Only show details that belong to the current selection.
+  const selectedBook = fetchedBook !== null && fetchedBook.asin === selectedAsin ? fetchedBook : null
 
   // On phones the panel sits below the shelf; bring it into view.
   useEffect(() => {
@@ -35,11 +37,7 @@ export default function MatchesPage({ status = null, onSyncStarted = () => {} }:
   }, [])
 
   useEffect(() => {
-    if (selectedAsin === null) {
-      setSelectedBook(null)
-      return
-    }
-    fetchUnmatchedDetail(selectedAsin).then(setSelectedBook)
+    if (selectedAsin !== null) fetchUnmatchedDetail(selectedAsin).then(setFetchedBook)
   }, [selectedAsin])
 
   const handleConfirm = async (hardcoverBookId: number) => {
