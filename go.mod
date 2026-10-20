@@ -9,7 +9,6 @@ require (
 	github.com/containrrr/shoutrrr v0.8.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/mstrhakr/go-audible v0.2.7
-	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.49.0
 	modernc.org/sqlite v1.54.0
 )

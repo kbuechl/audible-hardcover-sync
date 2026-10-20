@@ -13,6 +13,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/hardcover"
@@ -29,6 +30,11 @@ type HardcoverSearcher interface {
 type Server struct {
 	store *state.Store
 	hc    HardcoverSearcher
+
+	// Set by WithService; nil when only the match endpoints are served.
+	svc     Service
+	syncCtx context.Context
+	testURL func(string) error
 }
 
 func New(store *state.Store, hc HardcoverSearcher) *Server {
@@ -41,6 +47,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/unmatched/{asin}", s.handleAPIUnmatchedDetail)
 	mux.HandleFunc("GET /api/search", s.handleAPISearch)
 	mux.HandleFunc("POST /api/resolve", s.handleAPIResolve)
+	if s.svc != nil {
+		s.registerServiceRoutes(mux)
+	}
 	mux.Handle("/", spaHandler())
 	return mux
 }
@@ -108,7 +117,17 @@ func (s *Server) handleAPISearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.hc.SearchBooks(r.Context(), query, 10)
+	searcher := s.hc
+	if s.svc != nil {
+		hc := s.svc.Hardcover()
+		if hc == nil {
+			writeError(w, http.StatusServiceUnavailable, errors.New("Hardcover isn't connected: add your API token in Settings"))
+			return
+		}
+		searcher = hc
+	}
+
+	results, err := searcher.SearchBooks(r.Context(), query, 10)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -122,7 +141,7 @@ func (s *Server) handleAPISearch(w http.ResponseWriter, r *http.Request) {
 	// candidate matches themselves are still useful without cover art, and
 	// the frontend renders a placeholder tile for any book with no
 	// (or unresolved) cover URL.
-	covers, err := s.hc.FetchCoverURLs(r.Context(), ids)
+	covers, err := searcher.FetchCoverURLs(r.Context(), ids)
 	if err != nil {
 		covers = map[int64]string{}
 	}

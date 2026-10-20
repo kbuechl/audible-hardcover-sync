@@ -5,6 +5,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/containrrr/shoutrrr"
 
@@ -47,5 +48,10 @@ func (n *Notifier) NotifyUnmatched(ctx context.Context, items []state.BookState)
 }
 
 func buildMessage(items []state.BookState, publicURL string) string {
-	return fmt.Sprintf("%d book(s) need manual matching on Hardcover: %s/unmatched", len(items), publicURL)
+	msg := fmt.Sprintf("%d book(s) need manual matching on Hardcover", len(items))
+	if publicURL == "" {
+		return msg + ". Open the web UI to match them."
+	}
+	// The match page is the web UI's root.
+	return msg + ": " + strings.TrimRight(publicURL, "/") + "/"
 }

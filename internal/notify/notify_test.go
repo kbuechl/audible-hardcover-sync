@@ -69,19 +69,31 @@ func TestBuildMessage(t *testing.T) {
 			name:      "multiple items",
 			items:     []state.BookState{{ASIN: "A1"}, {ASIN: "A2"}},
 			publicURL: "http://homeserver.local:8080",
-			want:      "2 book(s) need manual matching on Hardcover: http://homeserver.local:8080/unmatched",
+			want:      "2 book(s) need manual matching on Hardcover: http://homeserver.local:8080/",
 		},
 		{
 			name:      "single item",
 			items:     []state.BookState{{ASIN: "A1"}},
 			publicURL: "http://homeserver.local:8080",
-			want:      "1 book(s) need manual matching on Hardcover: http://homeserver.local:8080/unmatched",
+			want:      "1 book(s) need manual matching on Hardcover: http://homeserver.local:8080/",
+		},
+		{
+			name:      "trailing slash in public URL",
+			items:     []state.BookState{{ASIN: "A1"}},
+			publicURL: "http://homeserver.local:8080/",
+			want:      "1 book(s) need manual matching on Hardcover: http://homeserver.local:8080/",
+		},
+		{
+			name:      "no public URL",
+			items:     []state.BookState{{ASIN: "A1"}},
+			publicURL: "",
+			want:      "1 book(s) need manual matching on Hardcover. Open the web UI to match them.",
 		},
 		{
 			name:      "zero items",
 			items:     nil,
 			publicURL: "http://homeserver.local:8080",
-			want:      "0 book(s) need manual matching on Hardcover: http://homeserver.local:8080/unmatched",
+			want:      "0 book(s) need manual matching on Hardcover: http://homeserver.local:8080/",
 		},
 	}
 

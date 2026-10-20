@@ -77,7 +77,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + settingsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}

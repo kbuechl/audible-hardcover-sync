@@ -13,9 +13,13 @@ COPY third_party/go-audible/go.mod third_party/go-audible/go.mod
 RUN go mod download
 COPY . .
 COPY --from=frontend-build /src/internal/webui/frontend/dist internal/webui/frontend/dist
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/sync-tool ./cmd/sync-tool
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/sync-tool ./cmd/sync-tool \
+    && mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/sync-tool /usr/local/bin/sync-tool
+# The distroless image has no shell to create it, so copy in an empty /data.
+COPY --from=build /out/data /data
+VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/sync-tool"]
 CMD ["serve"]
