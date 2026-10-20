@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend-build
 WORKDIR /src/internal/webui/frontend
 COPY internal/webui/frontend/package.json internal/webui/frontend/package-lock.json ./
 RUN npm ci
