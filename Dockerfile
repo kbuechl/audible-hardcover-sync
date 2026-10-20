@@ -7,13 +7,14 @@ RUN npm run build
 
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 ARG TARGETOS TARGETARCH
+ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY third_party/go-audible/go.mod third_party/go-audible/go.mod
 RUN go mod download
 COPY . .
 COPY --from=frontend-build /src/internal/webui/frontend/dist internal/webui/frontend/dist
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/sync-tool ./cmd/sync-tool \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o /out/sync-tool ./cmd/sync-tool \
     && mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12

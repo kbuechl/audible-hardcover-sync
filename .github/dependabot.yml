@@ -1,0 +1,32 @@
+# Weekly dependency updates, grouped so each ecosystem opens at most one
+# PR for minor/patch bumps. Majors still get their own PR.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /internal/webui/frontend
+    schedule:
+      interval: weekly
+    groups:
+      web-ui:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
