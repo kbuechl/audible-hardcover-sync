@@ -1,5 +1,6 @@
 // Regenerates the README screenshots from the built UI with made-up data:
-// public-domain books, a fake account and placeholder notification URLs.
+// public-domain books, a fake account and placeholder notification URLs,
+// all in the light theme so the README looks consistent.
 // No server, Audible or Hardcover account is involved.
 //
 //   npm run build && npm run screenshots
@@ -57,9 +58,9 @@ async function mockAPI(page) {
 
 const shots = [
   { name: 'matches', hash: 'matches', theme: 'light', size: 'desktop', open: 'Moby-Dick; or, The Whale' },
-  { name: 'setup', hash: 'setup', theme: 'dark', size: 'desktop', fullPage: true },
+  { name: 'setup', hash: 'setup', theme: 'light', size: 'desktop', fullPage: true },
   { name: 'notifications', hash: 'notifications', theme: 'light', size: 'desktop' },
-  { name: 'phone-matches', hash: 'matches', theme: 'dark', size: 'phone', open: 'Moby-Dick; or, The Whale', scrollTo: 'Resolve match' },
+  { name: 'phone-matches', hash: 'matches', theme: 'light', size: 'phone', open: 'Moby-Dick; or, The Whale', scrollTo: 'Resolve match' },
   { name: 'phone-setup', hash: 'setup', theme: 'light', size: 'phone' },
 ]
 
