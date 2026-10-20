@@ -72,7 +72,7 @@ title-and-author search, and writes the result. See
 1. Get the compose file and start it:
    ```bash
    mkdir audible-hardcover-sync && cd audible-hardcover-sync
-   curl -fsSLO https://raw.githubusercontent.com/kbuechl/audible-hardcover-sync/master/docker-compose.yml
+   curl -fsSLO https://raw.githubusercontent.com/kbuechl/audible-hardcover-sync/main/docker-compose.yml
    docker compose up -d
    ```
 2. Open `http://localhost:8080` and finish the first-time setup below.
@@ -191,7 +191,7 @@ The image's entrypoint is `sync-tool`; the default command is `serve`.
 docker compose pull && docker compose up -d
 ```
 
-Images are tagged `latest` (the `master` branch), `sha-<commit>`, and a
+Images are tagged `latest` (the `main` branch), `sha-<commit>`, and a
 version (`1.2.3`, `1.2`) for each release. Pin a version tag for
 predictable updates.
 
