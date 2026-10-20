@@ -1,11 +1,17 @@
 # Weekly dependency updates, grouped so each ecosystem opens at most one
 # PR for minor/patch bumps. Majors still get their own PR.
+#
+# cooldown: a release must be at least 7 days old before Dependabot offers
+# it, so a hijacked or broken release is usually caught and pulled first.
+# Security updates ignore the cooldown.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       go:
         update-types: [minor, patch]
@@ -14,6 +20,8 @@ updates:
     directory: /internal/webui/frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       web-ui:
         update-types: [minor, patch]
@@ -22,6 +30,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         update-types: [minor, patch]
@@ -30,3 +40,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
