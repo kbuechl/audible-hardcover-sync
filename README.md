@@ -1,12 +1,57 @@
-# audible-hardcover-sync
+<h1 align="center">
+  <img src="internal/webui/frontend/public/favicon.svg" width="56" alt=""><br>
+  audible-hardcover-sync
+</h1>
 
-Syncs Audible listening history to Hardcover: finished books → Read,
-in-progress books → Currently Reading. Audible has no public API, so this
-uses a vendored, extended fork of the reverse-engineered `go-audible`
-client. Matching is ISBN/ASIN-exact first, then fuzzy title/author;
-books that can't be matched automatically show up on a manual-match
-web page, with optional notifications (Slack/Discord/email/etc via
-shoutrrr) when that happens.
+<p align="center">
+  Keep your <a href="https://hardcover.app">Hardcover</a> shelves in step with what you listen to on Audible.
+</p>
+
+<p align="center">
+  <a href="https://github.com/kbuechl/audible-hardcover-sync/actions/workflows/docker.yml"><img src="https://github.com/kbuechl/audible-hardcover-sync/actions/workflows/docker.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/kbuechl/audible-hardcover-sync/pkgs/container/audible-hardcover-sync"><img src="https://img.shields.io/badge/ghcr.io-image-2f5d50?logo=docker&logoColor=white" alt="Container image"></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/kbuechl/audible-hardcover-sync" alt="Go version">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-b08d3e" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/matches.png" alt="The Matches page: unmatched audiobooks on the left, Hardcover search results with a highlighted best match on the right" width="860">
+</p>
+
+## Features
+
+- **Finished books become Read, in-progress books Currently Reading**, with
+  the audiobook edition, finish date, your Audible star rating and
+  listening progress.
+- **Re-listens count.** Starting a Read book again on Audible adds a new
+  read on Hardcover instead of overwriting the old one.
+- **Never undoes your edits.** Books already on your Hardcover shelves keep
+  their status, rating and dates; only listening progress moves forward.
+- **Matches it can't make alone wait for you.** The web UI suggests the
+  likeliest Hardcover book; confirm it in one tap, on desktop or phone.
+- **Notifications** to Discord, Slack, ntfy, Telegram, email and
+  [more](https://containrrr.dev/shoutrrr/) when books need you.
+- **Set up entirely in the browser.** Connect Audible and Hardcover,
+  pick a schedule and add notifications without touching a config file.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Audible library<br>and listening history] --> S(audible-hardcover-sync)
+    S -->|ISBN / ASIN match| H[Hardcover]
+    S -->|fuzzy title + author match| H
+    S -->|no confident match| M[Matches page]
+    M -->|you confirm| H
+    S -.->|optional| N[Notifications]
+```
+
+Audible has no public API, so this uses a vendored, extended fork of the
+reverse-engineered [`go-audible`](https://github.com/mstrhakr/go-audible)
+client. Each sync reads your library and listening progress, matches
+every book to Hardcover by ISBN or ASIN first and then by a scored
+title-and-author search, and writes the result. See
+[Sync behavior](#sync-behavior) for the details.
 
 > [!WARNING]
 > **The web UI has no login.** Anyone who can reach it can see your
@@ -24,35 +69,50 @@ shoutrrr) when that happens.
 
 ## Quick start
 
-1. Get the compose file and env template:
+1. Get the compose file and start it:
    ```bash
    mkdir audible-hardcover-sync && cd audible-hardcover-sync
    curl -fsSLO https://raw.githubusercontent.com/kbuechl/audible-hardcover-sync/master/docker-compose.yml
-   curl -fsSL https://raw.githubusercontent.com/kbuechl/audible-hardcover-sync/master/.env.example -o .env
-   ```
-2. Edit `.env`: set `HARDCOVER_API_TOKEN`, and `PUBLIC_URL` if you use
-   notifications (see [Configuration](#configuration)).
-3. Pull the image and log in to Audible once:
-   ```bash
-   docker compose pull
-   docker compose run --rm sync-tool auth
-   ```
-   Open the printed URL, sign in to Amazon, then copy the URL of the page
-   you land on (it may look like an error page) and paste it back into the
-   terminal. Credentials are saved to the `sync-data` volume.
-4. Start it:
-   ```bash
    docker compose up -d
-   docker compose logs -f
    ```
-   The first sync starts right away. Wait for
-   `sync complete synced=… unmatched=…`.
-5. Open the web UI (`http://<host>:8080`) to match any books it couldn't
-   match on its own.
+2. Open `http://localhost:8080` and finish the first-time setup below.
 
-The first sync of a large library takes a while: Hardcover's free API
-tier allows about 60 requests a minute, and the tool paces itself to
-that.
+The compose file only listens on the machine itself. To open the UI from
+another device on your network, change `127.0.0.1:8080:8080` in
+`docker-compose.yml` to `<your LAN IP>:8080:8080`.
+
+> [!IMPORTANT]
+> ### First-time setup
+>
+> The UI opens on **Setup** until both accounts are connected.
+>
+> 1. **Connect Audible.** Sign in on the Amazon page that opens. You'll
+>    land on a page that may look like an error: copy its full address
+>    and paste it back into the UI.
+> 2. **Add your Hardcover token** from hardcover.app → Settings → API. It's
+>    checked, saved on the server and never shown again.
+> 3. **Pick a schedule** under Preferences (default every 6 hours) and
+>    press **Sync now**.
+>
+> The first sync of a large library takes a while: Hardcover's free API
+> allows about 60 requests a minute, and the tool paces itself to that.
+> Afterwards, check **Matches** for books it couldn't place, and add a
+> **Notifications** service to hear about new ones.
+
+<table>
+  <tr>
+    <td width="62%"><img src="assets/screenshots/setup.png" alt="Setup page in dark mode: Audible and Hardcover connected, last sync results and preferences"></td>
+    <td width="38%"><img src="assets/screenshots/phone-matches.png" alt="Matches page on a phone in dark mode"></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/notifications.png" alt="Notifications page with two services and a form to add another"></td>
+    <td><img src="assets/screenshots/phone-setup.png" alt="Setup page on a phone in light mode"></td>
+  </tr>
+</table>
+
+Prefer the terminal? `docker compose run --rm sync-tool auth` connects
+Audible from there instead, and `HARDCOVER_API_TOKEN` can supply the
+token (see [Configuration](#configuration)).
 
 ### Already running Compose stacks?
 
@@ -62,11 +122,6 @@ Add the service to an existing compose file instead:
   audible-hardcover-sync:
     image: ghcr.io/kbuechl/audible-hardcover-sync:latest
     restart: unless-stopped
-    environment:
-      - HARDCOVER_API_TOKEN
-      - PUBLIC_URL
-      - NOTIFY_URLS
-      - SYNC_INTERVAL=30m
     volumes:
       - ./audible-hardcover-sync:/data
     ports:
@@ -74,24 +129,23 @@ Add the service to an existing compose file instead:
       - 8080:8080
 ```
 
-Then run `docker compose run --rm audible-hardcover-sync auth` once
-before `docker compose up -d audible-hardcover-sync`.
+Then `docker compose up -d audible-hardcover-sync` and finish setup in
+the web UI.
 
 ## Configuration
 
-Set in `.env` (or the service's `environment`).
+Sync schedule, match strictness and the address used in notification
+links are set in the web UI under **Setup → Preferences**. The rest is
+optional environment variables, set in `.env` or the service's
+`environment`.
 
-| Variable | Required | Default | What it does |
-|---|---|---|---|
-| `HARDCOVER_API_TOKEN` | yes | | Your Hardcover API token. |
-| `PUBLIC_URL` | no | | Address of the web UI, used for links in notifications, e.g. `http://192.168.1.10:8080`. Use a LAN or VPN address: the UI has no login, so it must not be publicly reachable. |
-| `SYNC_INTERVAL` | no | `6h` | Time between syncs, e.g. `30m`, `1h`. |
-| `NOTIFY_URLS` | no | | Comma-separated [shoutrrr](https://containrrr.dev/shoutrrr/) URLs, notified when books can't be matched. |
-| `MATCH_CONFIDENCE` | no | `strict` | Fuzzy title/author match threshold: `strict` (0.95), `medium` (0.75), `loose` (0.55), or a number. |
-| `CREDENTIALS_KEY` | no | | Opt-in: a passphrase that encrypts the saved Audible login (AES-256-GCM). See [Credentials](#credentials). |
+| Variable | Default | What it does |
+|---|---|---|
+| `HARDCOVER_API_TOKEN` | | Your Hardcover API token, instead of setting it in the UI. When set, the UI can't change it. |
+| `CREDENTIALS_KEY` | | Opt-in: a passphrase that encrypts the saved Audible login and Hardcover token (AES-256-GCM). See [Credentials](#credentials). |
 
-Everything the tool saves (`state.db` and `credentials.json`) goes in the
-`/data` volume. To change the web UI's port, change the host side of the
+Everything the tool saves (`state.db`, `credentials.json` and
+`hardcover-token`) goes in the `/data` volume. To change the web UI's port, change the host side of the
 port mapping (e.g. `9000:8080`).
 
 Running the binary outside Docker? `DATA_DIR` (default `/data`) and
@@ -99,20 +153,27 @@ Running the binary outside Docker? `DATA_DIR` (default `/data`) and
 
 ## Credentials
 
-`auth` registers this tool as an Audible device and saves that device's
-tokens to `/data/credentials.json` (owner-only permissions). It doesn't store
-your Amazon password, but anyone with the file can use your Audible
-account as that device.
+Connecting Audible registers this tool as an Audible device and saves
+that device's tokens to `/data/credentials.json`. A Hardcover token
+entered in the UI is saved to `/data/hardcover-token`. Both files have
+owner-only permissions. Your Amazon password is never stored.
 
-- **Plain by default.** Without `CREDENTIALS_KEY` the file is JSON.
+The web UI never shows either one again: it only shows whether each is
+connected and your Hardcover username. Anyone with the files themselves
+can use your accounts, though.
+
+- **Plain by default.** Without `CREDENTIALS_KEY` the files are stored
+  as-is.
 - **Opt-in encryption.** Set `CREDENTIALS_KEY` to any long passphrase
-  (e.g. `openssl rand -base64 32`). The file is encrypted on the next
-  `auth` or sync; an existing plain file is converted automatically, no
-  new login needed. This mostly protects copies of the data folder, like
-  backups, so keep the key somewhere other than that folder.
-- **Lost the key?** Delete the credentials file and run `auth` again.
-- **File leaked?** Deregister the device on Amazon (Manage Your Content
-  and Devices → Devices), then run `auth` again.
+  (e.g. `openssl rand -base64 32`). Existing files are encrypted on the
+  next start or sync, with no new login needed. This mostly protects
+  copies of the data folder, like backups, so keep the key somewhere
+  other than that folder.
+- **Lost the key?** Delete both files and connect again in the UI.
+- **Log out.** Setup → Audible → **Log out** removes the device from your
+  Amazon account and deletes the saved login. If the file ever leaks,
+  you can also remove the device on Amazon (Manage Your Content and
+  Devices → Devices).
 
 ## Commands
 
@@ -120,9 +181,9 @@ The image's entrypoint is `sync-tool`; the default command is `serve`.
 
 | Command | What it does |
 |---|---|
-| `docker compose run --rm sync-tool auth` | Log in to Audible (once, or again if the login expires). |
+| `docker compose run --rm sync-tool auth` | Log in to Audible from the terminal instead of the UI. |
 | `docker compose run --rm sync-tool sync` | Run one sync now and exit. |
-| `docker compose up -d` | Run the web UI and sync on the `SYNC_INTERVAL` schedule. |
+| `docker compose up -d` | Run the web UI, sync at start and then on the schedule set in the UI. |
 
 ## Updating
 
@@ -136,37 +197,27 @@ predictable updates.
 
 ## Troubleshooting
 
-- **`config error`** on start: `HARDCOVER_API_TOKEN` is missing from
-  `.env`.
-- **`load audible credentials (run 'sync-tool auth' first)`**: the Audible
-  login step hasn't been done for this data volume.
-- **Audible errors after it worked before**: the saved login expired. Run
-  the `auth` command again.
+- **`skipping sync until setup is finished`** in the logs: Audible or
+  Hardcover isn't connected yet. Open the web UI's Setup page.
+- **Audible errors after it worked before**: the saved login expired.
+  Setup → Audible → **Reconnect**.
+- **`file is encrypted; set CREDENTIALS_KEY`**: the key was removed or
+  changed. Put it back, or delete the saved files and connect again.
 - **Lots of `unmatched`**: Hardcover search was down or the books aren't in
   its catalog. Unmatched books are retried every sync; match the rest by
   hand in the web UI.
 - **`status 429` / `408` in the logs**: Hardcover rate limits or timeouts.
   Lookups are retried; failed writes are picked up on the next sync.
-- **Start over**: stop the container and delete `state.db` from the data
-  volume. Your Hardcover library is not changed, and the next sync
-  re-checks everything.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-## Third-party licenses
-
-See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for a full list of
-vendored source and dependencies with their licenses.
+- **Start over**: Setup → Sync → **Reset sync history**. Your Hardcover
+  library, logins and notification settings are kept; the next sync
+  re-checks every book.
 
 ## Sync behavior
 
 - **Matching priority.** The sync matches on ISBN/ASIN exactly first, then
   falls back to a confidence-scored fuzzy title/author match. The fuzzy
-  threshold is configurable via the `MATCH_CONFIDENCE` env var: `strict`
-  (0.95, default), `medium` (0.75), `loose` (0.55), or a raw
-  number/percentage.
+  threshold is set under **Setup → Preferences**: Strict (0.95, default),
+  Medium (0.75) or Loose (0.55).
 - **Existing entries are skipped.** If a book is already in your Hardcover
   library (any status — Read, Currently Reading, Want to Read), the sync
   will NOT modify it:
@@ -197,3 +248,26 @@ vendored source and dependencies with their licenses.
   exponential backoff for read operations (searches, lookups), but
   mutations (inserts/updates) are NOT retried to prevent duplicate
   entries.
+
+## Development
+
+```bash
+go test ./...                                  # backend
+cd internal/webui/frontend && npm ci && npm test   # web UI
+npm run build                                  # rebuild the embedded UI (commit dist/)
+npm run screenshots                            # regenerate the README screenshots
+```
+
+The screenshots use made-up data (public-domain books, placeholder
+accounts) served by a mocked API, so no real library ever ends up in the
+repo.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Third-party licenses
+
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for a full list of
+vendored source and dependencies with their licenses.
+
