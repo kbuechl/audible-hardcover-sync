@@ -23,8 +23,28 @@ jobs:
           go-version-file: go.mod
       - run: go test ./...
 
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/webui/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: internal/webui/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      # The Go binary embeds the committed dist/, so it must match a fresh build.
+      - name: Check dist/ is up to date
+        run: git diff --exit-code -- dist || (echo "::error::dist/ is stale. Run npm run build and commit it." && exit 1)
+
   image:
-    needs: test
+    needs: [test, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
