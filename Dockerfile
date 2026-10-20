@@ -5,7 +5,7 @@ RUN npm ci
 COPY internal/webui/frontend .
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH
 ARG VERSION=dev
 WORKDIR /src

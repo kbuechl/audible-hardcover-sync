@@ -101,12 +101,12 @@ another device on your network, change `127.0.0.1:8080:8080` in
 
 <table>
   <tr>
-    <td width="62%"><img src="assets/screenshots/setup.png" alt="Setup page in dark mode: Audible and Hardcover connected, last sync results and preferences"></td>
-    <td width="38%"><img src="assets/screenshots/phone-matches.png" alt="Matches page on a phone in dark mode"></td>
+    <td width="62%"><img src="assets/screenshots/setup.png" alt="Setup page: Audible and Hardcover connected, last sync results and preferences"></td>
+    <td width="38%"><img src="assets/screenshots/phone-matches.png" alt="Matches page on a phone"></td>
   </tr>
   <tr>
     <td><img src="assets/screenshots/notifications.png" alt="Notifications page with two services and a form to add another"></td>
-    <td><img src="assets/screenshots/phone-setup.png" alt="Setup page on a phone in light mode"></td>
+    <td><img src="assets/screenshots/phone-setup.png" alt="Setup page on a phone"></td>
   </tr>
 </table>
 
