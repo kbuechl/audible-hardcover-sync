@@ -36,15 +36,10 @@
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A[Audible library<br>and listening history] --> S(audible-hardcover-sync)
-    S -->|ISBN / ASIN match| H[Hardcover]
-    S -->|fuzzy title + author match| H
-    S -->|no confident match| M[Matches page]
-    M -->|you confirm| H
-    S -.->|optional| N[Notifications]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/how-it-works-dark.svg">
+  <img src="assets/how-it-works-light.svg" alt="Audible feeds audible-hardcover-sync, which writes to Hardcover after an ISBN/ASIN or fuzzy title and author match; books without a confident match go to the Matches page for you to confirm, with optional notifications">
+</picture>
 
 Audible has no public API, so this uses a vendored, extended fork of the
 reverse-engineered [`go-audible`](https://github.com/mstrhakr/go-audible)
@@ -261,6 +256,7 @@ go test ./...                                  # backend
 cd internal/webui/frontend && npm ci && npm test   # web UI
 npm run build                                  # rebuild the embedded UI (commit dist/)
 npm run screenshots                            # regenerate the README screenshots
+npm run diagram                                # redraw assets/how-it-works.mmd as SVG
 ```
 
 Releases: push a `v1.2.3` tag. GoReleaser publishes the binaries and
