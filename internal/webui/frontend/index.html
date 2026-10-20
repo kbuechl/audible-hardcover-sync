@@ -4,7 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        var t = localStorage.getItem('theme')
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+      } catch (e) {}
+    </script>
+    <title>Audible → Hardcover</title>
+    <meta name="theme-color" content="#f1f0e9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#16191a" media="(prefers-color-scheme: dark)" />
   </head>
   <body>
     <div id="root"></div>

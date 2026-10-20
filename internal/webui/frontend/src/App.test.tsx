@@ -4,8 +4,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import App from './App'
 import * as api from './api'
 
+const connectedStatus = {
+  audible: { connected: true },
+  hardcover: { connected: true, username: 'reader', fromEnv: false },
+  sync: { running: false },
+}
+
 describe('App resolve flow', () => {
   beforeEach(() => {
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '' })
+    window.location.hash = ''
+    vi.spyOn(api, 'fetchStatus').mockResolvedValue(connectedStatus)
     vi.spyOn(api, 'fetchUnmatched').mockResolvedValue([
       { asin: 'A1', title: 'A Court of Thorns and Roses', author: 'Sarah J. Maas', status: 'finished', percentComplete: 100 },
     ])
@@ -35,6 +44,7 @@ describe('App resolve flow', () => {
     await user.click(confirmButton)
 
     await waitFor(() => expect(resolveSpy).toHaveBeenCalledWith('A1', 999))
+    expect(await screen.findByRole('status')).toHaveTextContent(/matched “A Court of Thorns and Roses”/i)
     await waitFor(() => expect(screen.getByText(/nothing to resolve/i)).toBeInTheDocument())
   })
 
@@ -90,5 +100,39 @@ describe('App resolve flow', () => {
     resolveConfirm()
 
     await waitFor(() => expect(screen.getByText(/nothing to resolve/i)).toBeInTheDocument())
+  })
+})
+
+describe('App navigation', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '' })
+    window.location.hash = ''
+    vi.spyOn(api, 'fetchUnmatched').mockResolvedValue([])
+  })
+
+  it('opens on Setup when Audible is not connected', async () => {
+    vi.spyOn(api, 'fetchStatus').mockResolvedValue({ ...connectedStatus, audible: { connected: false } })
+    render(<App />)
+    expect(await screen.findByRole('button', { name: /connect audible/i })).toBeInTheDocument()
+  })
+
+  it('stays on Setup after setup finishes', async () => {
+    vi.spyOn(api, 'fetchStatus')
+      .mockResolvedValueOnce({ ...connectedStatus, hardcover: { connected: false, fromEnv: false } })
+      .mockResolvedValue(connectedStatus)
+    vi.spyOn(api, 'setHardcoverToken').mockResolvedValue('reader')
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(await screen.findByLabelText(/hardcover api token/i), 'tok')
+    await user.click(screen.getByRole('button', { name: /save token/i }))
+    await waitFor(() => expect(api.fetchStatus).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText(/@reader/)).toBeInTheDocument()
+    expect(screen.queryByText(/unmatched shelf/i)).not.toBeInTheDocument()
+  })
+
+  it('opens on Matches when everything is connected', async () => {
+    vi.spyOn(api, 'fetchStatus').mockResolvedValue(connectedStatus)
+    render(<App />)
+    expect(await screen.findByText(/unmatched shelf/i)).toBeInTheDocument()
   })
 })

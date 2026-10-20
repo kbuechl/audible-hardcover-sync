@@ -15,3 +15,29 @@ export interface SearchResultItem {
   slug: string
   coverUrl?: string
 }
+
+export interface SyncReport {
+  finishedAt: string
+  synced: number
+  unchanged: number
+  unmatched: number
+  errored: number
+  error?: string
+}
+
+export interface Status {
+  audible: { connected: boolean; error?: string }
+  hardcover: { connected: boolean; username?: string; fromEnv: boolean; error?: string }
+  sync: { running: boolean; last?: SyncReport }
+}
+
+export interface NotifyTarget {
+  id: number
+  masked: string
+}
+
+export interface Preferences {
+  syncInterval: string
+  matchConfidence: 'strict' | 'medium' | 'loose'
+  publicUrl: string
+}

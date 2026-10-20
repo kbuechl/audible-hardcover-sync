@@ -22,8 +22,11 @@
   --color-gold: #b08d3e;
 }
 
+/* Tailwind only reads top-level @theme blocks, so dark mode overrides the
+   variables directly: from the system setting unless the user picked light,
+   or always when they picked dark. */
 @media (prefers-color-scheme: dark) {
-  @theme {
+  :root:not([data-theme="light"]) {
     --color-paper: #16191a;
     --color-panel: #1d2220;
     --color-line: #33362f;
@@ -38,7 +41,38 @@
   }
 }
 
+:root[data-theme="dark"] {
+  --color-paper: #16191a;
+  --color-panel: #1d2220;
+  --color-line: #33362f;
+  --color-ink: #ede9df;
+  --color-muted: #9c9788;
+  --color-pine: #6fa593;
+  --color-pine-soft: #223530;
+  --color-pine-text: #a9d6c8;
+  --color-burgundy: #d99184;
+  --color-burgundy-soft: #35211d;
+  --color-gold: #d6b36b;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.fade-in {
+  animation: fade-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in { animation: none; }
+}
+
 body {
   background: var(--color-paper);
   color: var(--color-ink);
 }
+
+:root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
