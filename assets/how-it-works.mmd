@@ -1,0 +1,7 @@
+flowchart LR
+    A[Audible library<br>and listening history] --> S(audible-hardcover-sync)
+    S -->|ISBN / ASIN match| H[Hardcover]
+    S -->|fuzzy title + author match| H
+    S -->|no confident match| M[Matches page]
+    M -->|you confirm| H
+    S -.->|optional| N[Notifications]
