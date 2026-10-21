@@ -18,7 +18,7 @@ import (
 func newTestServer(t *testing.T, handler func(query string, vars map[string]any) (any, error)) (*httptest.Server, *Client) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("authorization") != "test-token" {
+		if r.Header.Get("authorization") != "Bearer test-token" {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]any{"error": "Unable to verify token"})
 			return
@@ -899,5 +899,15 @@ func TestClient_FindBookByISBN_NoIDs(t *testing.T) {
 	})
 	if _, found, err := c.FindBookByISBN(context.Background(), "", ""); found || err != nil {
 		t.Fatalf("FindBookByISBN(\"\", \"\") = found %v, err %v; want not found, no error", found, err)
+	}
+}
+
+// Scoped Hardcover tokens require the Bearer scheme; a pasted token may or
+// may not already carry it.
+func TestNew_BearerToken(t *testing.T) {
+	for _, in := range []string{"abc", "Bearer abc", "  bearer abc  "} {
+		if got := New(in).token; got != "Bearer abc" {
+			t.Errorf("New(%q).token = %q, want %q", in, got, "Bearer abc")
+		}
 	}
 }
