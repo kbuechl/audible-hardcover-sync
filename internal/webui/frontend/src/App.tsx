@@ -6,6 +6,7 @@ import SetupPage from './pages/SetupPage'
 import NotificationsPage from './pages/NotificationsPage'
 import StatusPill from './components/StatusPill'
 import ThemeToggle from './components/ThemeToggle'
+import VersionFooter from './components/VersionFooter'
 
 const tabs = [
   { id: 'matches', label: 'Matches' },
@@ -92,6 +93,8 @@ export default function App() {
         {active === 'setup' && <SetupPage status={status} onChanged={refresh} />}
         {active === 'notifications' && <NotificationsPage />}
       </main>
+
+      <VersionFooter version={status?.version} />
     </div>
   )
 }

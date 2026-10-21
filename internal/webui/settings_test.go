@@ -63,7 +63,7 @@ func (f *fakeService) TestNotifyTarget(int) error                 { return f.tes
 
 func serve(t *testing.T, svc *fakeService, method, path, body string) (int, string) {
 	t.Helper()
-	srv := New(newTestStore(t), &fakeSearcher{}).WithService(svc, context.Background(), func(string) error { return nil })
+	srv := New(newTestStore(t), &fakeSearcher{}).WithService(svc, context.Background(), func(string) error { return nil }).WithVersion("1.2.3")
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -81,6 +81,7 @@ func TestSettingsEndpoints(t *testing.T) {
 		wantBody     string
 	}{
 		{"status", &fakeService{}, "GET", "/api/status", "", 200, `"username":"reader"`},
+		{"status version", &fakeService{}, "GET", "/api/status", "", 200, `"version":"1.2.3"`},
 		{"start audible login", &fakeService{}, "POST", "/api/audible/login", "", 200, `amazon.example`},
 		{"finish audible login error", &fakeService{finishErr: errors.New("bad redirect")}, "POST", "/api/audible/login/finish", `{"redirectUrl":"x"}`, 400, `"error":"bad redirect"`},
 		{"logout", &fakeService{}, "POST", "/api/audible/logout", "", 204, ""},
