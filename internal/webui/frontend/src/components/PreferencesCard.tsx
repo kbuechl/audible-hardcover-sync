@@ -114,7 +114,9 @@ export default function PreferencesCard() {
             autoComplete="off"
           />
           <span className="text-xs text-muted">
-            Optional. Messages link here so you can match books in one tap.{' '}
+            {prefs.publicUrl === ''
+              ? "Not set, so notifications won't include a link to this page. "
+              : 'Messages link here so you can match books in one tap.'}
             {prefs.publicUrl === '' && (
               <button type="button" className="text-pine-text underline decoration-dotted" onClick={() => update({ publicUrl: origin })}>
                 Use {origin}

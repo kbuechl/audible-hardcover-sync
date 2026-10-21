@@ -61,7 +61,9 @@ title-and-author search, and writes the result. See
 - An Audible account on the **US** marketplace (audible.com). Other
   marketplaces aren't supported yet.
 - A Hardcover account and API token: hardcover.app → Settings → API.
-  Give the token only these scopes (avoid `all`):
+  Pick the **E-reader / sync client** preset when creating the token. It
+  covers everything the app needs; avoid `all`. If you'd rather choose
+  scopes yourself, these are the minimum:
 
   | Scope | Used for |
   |---|---|
