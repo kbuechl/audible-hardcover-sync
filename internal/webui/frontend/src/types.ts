@@ -29,6 +29,7 @@ export interface Status {
   audible: { connected: boolean; error?: string }
   hardcover: { connected: boolean; username?: string; fromEnv: boolean; error?: string }
   sync: { running: boolean; last?: SyncReport }
+  version?: string
 }
 
 export interface NotifyTarget {

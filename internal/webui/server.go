@@ -35,6 +35,14 @@ type Server struct {
 	svc     Service
 	syncCtx context.Context
 	testURL func(string) error
+
+	version string
+}
+
+// WithVersion sets the build version reported by /api/status.
+func (s *Server) WithVersion(v string) *Server {
+	s.version = v
+	return s
 }
 
 func New(store *state.Store, hc HardcoverSearcher) *Server {

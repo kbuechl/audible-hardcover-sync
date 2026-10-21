@@ -55,7 +55,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if hc := a.Hardcover(); hc != nil {
 		searcher = hc
 	}
-	webServer := webui.New(store, searcher).WithService(a, ctx, app.TestNotifyURL)
+	webServer := webui.New(store, searcher).WithService(a, ctx, app.TestNotifyURL).WithVersion(version)
 
 	httpServer := &http.Server{Addr: ":" + cfg.WebUIPort, Handler: webServer.Handler()}
 	go func() {
