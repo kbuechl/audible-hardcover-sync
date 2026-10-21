@@ -49,6 +49,16 @@ type Client struct {
 	userID int64 // resolved lazily via Me(), cached for UpsertUserBook
 }
 
+// bearer returns token as an Authorization value. Hardcover's scoped tokens
+// require the Bearer scheme; pasted tokens may already include it.
+func bearer(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) >= 7 && strings.EqualFold(token[:7], "bearer ") {
+		token = strings.TrimSpace(token[7:])
+	}
+	return "Bearer " + token
+}
+
 func New(token string) *Client {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = 4
@@ -58,7 +68,7 @@ func New(token string) *Client {
 	retryClient.Backoff = retryablehttp.DefaultBackoff // exponential, respects Retry-After on 429
 
 	return &Client{
-		token:      token,
+		token:      bearer(token),
 		endpoint:   defaultEndpoint,
 		httpClient: retryClient.StandardClient(),
 		limiter:    newLimiter(fallbackRequestGap),

@@ -61,6 +61,14 @@ title-and-author search, and writes the result. See
 - An Audible account on the **US** marketplace (audible.com). Other
   marketplaces aren't supported yet.
 - A Hardcover account and API token: hardcover.app → Settings → API.
+  Give the token only these scopes (avoid `all`):
+
+  | Scope | Used for |
+  |---|---|
+  | `read:catalog` | Finding your Audible books on Hardcover |
+  | `read:library` | Checking what's already on your shelf, including private entries |
+  | `read:me:content` | Showing your username on the Setup page |
+  | `write:library` | Adding books and updating status and reading progress |
 
 ## Quick start
 
