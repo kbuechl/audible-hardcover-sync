@@ -64,6 +64,7 @@ type statusDTO struct {
 	Audible   app.AudibleStatus   `json:"audible"`
 	Hardcover app.HardcoverStatus `json:"hardcover"`
 	Sync      syncStatusDTO       `json:"sync"`
+	Version   string              `json:"version"`
 }
 
 type syncStatusDTO struct {
@@ -81,6 +82,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Audible:   s.svc.AudibleStatus(),
 		Hardcover: s.svc.HardcoverStatus(r.Context()),
 		Sync:      syncStatusDTO{Running: s.svc.Syncing(), Last: last},
+		Version:   s.version,
 	})
 }
 
