@@ -31,4 +31,9 @@ describe('PreferencesCard', () => {
     await user.click(await screen.findByRole('button', { name: /save preferences/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent('web UI address')
   })
+
+  it('warns that notifications have no link while the address is blank', async () => {
+    render(<PreferencesCard />)
+    expect(await screen.findByText(/notifications won't include a link/i)).toBeInTheDocument()
+  })
 })
