@@ -127,6 +127,9 @@ func continueRelisten(ctx context.Context, d Deps, item audible.LibraryItem, sta
 // library. Its status, rating and dates are never changed; only progress
 // and re-listen reads are written. It reports whether Hardcover changed.
 func syncExisting(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, prior *state.BookState, bookID int64) bool {
+	if existing.StatusID == hardcover.StatusWantToRead {
+		return promoteWantToRead(ctx, d, item, status, existing, bookID)
+	}
 	if prior != nil && prior.RelistenReadID != nil {
 		return continueRelisten(ctx, d, item, status, existing, prior, bookID)
 	}
@@ -156,4 +159,41 @@ func persist(d Deps, item audible.LibraryItem, status state.Status, percent floa
 	if err != nil {
 		slog.Error("persist synced state", "asin", item.ASIN, "error", err)
 	}
+}
+
+// promoteWantToRead moves a book shelved as Want to Read on Hardcover to
+// match Audible once listening has started: Currently Reading with
+// progress, or Read with the finish date and rating. It reports whether
+// Hardcover was updated. On failure nothing is recorded, so the next sync
+// retries.
+func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64) bool {
+	statusID := hardcover.StatusCurrentlyReading
+	var rating *int
+	var userDate *time.Time
+	if status == state.StatusFinished {
+		statusID, rating, userDate = hardcover.StatusRead, item.Rating, item.FinishedAt
+	}
+	if err := d.Hardcover.UpdateUserBookStatus(ctx, existing.ID, statusID, rating, userDate); err != nil {
+		slog.Error("move hardcover book off want to read", "asin", item.ASIN, "book_id", bookID, "error", err)
+		return false
+	}
+	slog.Info("moved hardcover book off want to read", "title", item.Title, "book_id", bookID, "status", status)
+
+	percent := item.PercentComplete
+	switch {
+	case status == state.StatusFinished && userDate == nil:
+		// Hardcover fills in today when a book becomes Read without a date.
+		if err := d.Hardcover.ClearFinishDate(ctx, existing.ID); err != nil {
+			slog.Error("clear hardcover finish date", "asin", item.ASIN, "book_id", bookID, "error", err)
+		}
+	case status == state.StatusInProgress:
+		if secs := progressSeconds(item); secs > 0 {
+			if err := d.Hardcover.SetReadProgress(ctx, existing.ID, item.PercentComplete, secs); err != nil {
+				slog.Error("set hardcover progress", "asin", item.ASIN, "book_id", bookID, "error", err)
+				percent = 0 // retried on the next sync, like a new book
+			}
+		}
+	}
+	persist(d, item, status, percent, bookID, nil)
+	return true
 }

@@ -75,6 +75,29 @@ func (c *Client) updateRead(ctx context.Context, readID int64, object map[string
 	return out.Result.err("update user_book_read")
 }
 
+// UpdateUserBookStatus changes an existing library entry's status, and
+// optionally its rating and finish date (user_date). Like the read
+// mutations, update_user_book reports failures in its own "error" field.
+func (c *Client) UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error {
+	object := map[string]any{"status_id": statusID}
+	if rating != nil {
+		object["rating"] = *rating
+	}
+	if userDate != nil {
+		object["user_date"] = userDate.Format(dateLayout)
+	}
+	var out struct {
+		Result mutationResult `json:"update_user_book"`
+	}
+	m := `mutation UpdateUserBookStatus($id: Int!, $object: UserBookUpdateInput!) {
+		update_user_book(id: $id, object: $object) { id error }
+	}`
+	if err := c.do(ctx, m, map[string]any{"id": userBookID, "object": object}, &out); err != nil {
+		return fmt.Errorf("update user_book: %w", err)
+	}
+	return out.Result.err("update user_book")
+}
+
 // ClearFinishDate removes the finish date from a user_book's newest read.
 // Hardcover fills in today's date when a book is added as Read without
 // one, which is wrong for a book whose finish date is unknown.

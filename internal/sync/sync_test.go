@@ -48,6 +48,7 @@ type fakeHardcover struct {
 	reads              map[int64]*fakeRead // read id → read opened by StartRead
 	clearedDates       []int64             // user_book ids passed to ClearFinishDate
 	nextReadID         int64
+	statusUpdates      map[int64]upsertCall // user_book id → UpdateUserBookStatus call
 }
 
 type fakeRead struct {
@@ -69,6 +70,7 @@ func newFakeHardcover() *fakeHardcover {
 		nextUserBookID:     5000,
 		reads:              map[int64]*fakeRead{},
 		nextReadID:         9000,
+		statusUpdates:      map[int64]upsertCall{},
 	}
 }
 
@@ -155,6 +157,14 @@ func (f *fakeHardcover) UpdateReadProgress(ctx context.Context, readID int64, pr
 
 func (f *fakeHardcover) FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error {
 	f.reads[readID].finishedAt = &finishedAt
+	return nil
+}
+
+func (f *fakeHardcover) UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error {
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
+	f.statusUpdates[userBookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate}
 	return nil
 }
 
@@ -779,6 +789,20 @@ func TestRun_Progress(t *testing.T) {
 			wantResult:   Result{Unchanged: 1},
 		},
 		{
+			name:         "existing Want to Read book moves to Currently Reading with progress",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusWantToRead},
+			wantProgress: map[int64]int{200: 5600},
+			wantResult:   Result{Synced: 1},
+		},
+		{
+			name:         "existing Did Not Finish book is not touched",
+			item:         inProgress(56),
+			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusDidNotFinish},
+			wantProgress: map[int64]int{},
+			wantResult:   Result{Unchanged: 1},
+		},
+		{
 			name:         "same percent as last sync is skipped",
 			item:         inProgress(56),
 			existing:     &hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusCurrentlyReading, ProgressSeconds: 1000},
@@ -888,4 +912,93 @@ func TestRun_SearchUnavailableIsErrorNotUnmatched(t *testing.T) {
 	if got, _ := store.Get("B000000001"); got != nil {
 		t.Errorf("state = %+v, want nothing recorded", got)
 	}
+}
+
+// A book shelved as Want to Read on Hardcover moves up once it's started
+// on Audible: to Currently Reading while listening, to Read when finished.
+// Other statuses are never changed.
+func TestRun_PromotesWantToRead(t *testing.T) {
+	const isbn = "9780641723445"
+	finishedAt := ptrTime("2026-10-01T12:00:00Z")
+	tests := []struct {
+		name        string
+		item        audible.LibraryItem
+		statusID    int
+		wantUpdate  *upsertCall
+		wantCleared []int64
+		wantResult  Result
+	}{
+		{
+			name:       "in progress becomes Currently Reading",
+			item:       audible.LibraryItem{ASIN: "A1", ISBN13: isbn, PercentComplete: 6, RuntimeSeconds: 10000},
+			statusID:   hardcover.StatusWantToRead,
+			wantUpdate: &upsertCall{statusID: hardcover.StatusCurrentlyReading},
+			wantResult: Result{Synced: 1},
+		},
+		{
+			name:       "finished becomes Read with finish date and rating",
+			item:       audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 100, FinishedAt: finishedAt, Rating: intPtr(4)},
+			statusID:   hardcover.StatusWantToRead,
+			wantUpdate: &upsertCall{statusID: hardcover.StatusRead, rating: intPtr(4), userDate: finishedAt},
+			wantResult: Result{Synced: 1},
+		},
+		{
+			name:        "finished without a date clears the date Hardcover fills in",
+			item:        audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 100},
+			statusID:    hardcover.StatusWantToRead,
+			wantUpdate:  &upsertCall{statusID: hardcover.StatusRead},
+			wantCleared: []int64{200},
+			wantResult:  Result{Synced: 1},
+		},
+		{
+			name:       "Did Not Finish is left alone",
+			item:       audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 100, FinishedAt: finishedAt},
+			statusID:   hardcover.StatusDidNotFinish,
+			wantResult: Result{Unchanged: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fh := newFakeHardcover()
+			fh.byISBN[isbn] = 777
+			fh.userBooks[777] = hardcover.UserBook{ID: 200, BookID: 777, StatusID: tt.statusID}
+			store := newTestStore(t)
+
+			result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{tt.item}}, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result != tt.wantResult {
+				t.Errorf("result = %+v, want %+v", result, tt.wantResult)
+			}
+			got, updated := fh.statusUpdates[200]
+			switch {
+			case tt.wantUpdate == nil && updated:
+				t.Errorf("status updated to %+v, want untouched", got)
+			case tt.wantUpdate != nil && !updated:
+				t.Errorf("status not updated, want %+v", *tt.wantUpdate)
+			case tt.wantUpdate != nil && describeCall(got) != describeCall(*tt.wantUpdate):
+				t.Errorf("status update = %s, want %s", describeCall(got), describeCall(*tt.wantUpdate))
+			}
+			if fmt.Sprint(fh.clearedDates) != fmt.Sprint(tt.wantCleared) {
+				t.Errorf("cleared dates = %v, want %v", fh.clearedDates, tt.wantCleared)
+			}
+			if len(fh.inserted) != 0 {
+				t.Errorf("inserted %v, want no new library entry", fh.inserted)
+			}
+		})
+	}
+}
+
+// describeCall prints an upsertCall by value, so pointer fields compare by
+// what they point to.
+func describeCall(c upsertCall) string {
+	out := fmt.Sprintf("status=%d", c.statusID)
+	if c.rating != nil {
+		out += fmt.Sprintf(" rating=%d", *c.rating)
+	}
+	if c.userDate != nil {
+		out += " date=" + c.userDate.Format(time.RFC3339)
+	}
+	return out
 }
