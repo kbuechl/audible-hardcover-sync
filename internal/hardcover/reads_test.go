@@ -102,3 +102,35 @@ func TestClient_ClearFinishDate(t *testing.T) {
 		t.Error("finish date was not cleared")
 	}
 }
+
+func TestClient_UpdateUserBookStatus(t *testing.T) {
+	rating := 4
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if !strings.Contains(query, "update_user_book(") || vars["id"] != float64(200) {
+			t.Errorf("query = %q vars = %v", query, vars)
+		}
+		obj := vars["object"].(map[string]any)
+		if obj["status_id"] != float64(StatusRead) || obj["rating"] != float64(4) || obj["user_date"] != "2026-10-01" || len(obj) != 3 {
+			t.Errorf("update object = %v", obj)
+		}
+		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": "not yours"}}, nil
+	})
+	finished := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	err := c.UpdateUserBookStatus(context.Background(), 200, StatusRead, &rating, &finished)
+	if err == nil || !strings.Contains(err.Error(), "not yours") {
+		t.Errorf("UpdateUserBookStatus() error = %v, want mutation error surfaced", err)
+	}
+}
+
+func TestClient_UpdateUserBookStatus_StatusOnly(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		obj := vars["object"].(map[string]any)
+		if obj["status_id"] != float64(StatusCurrentlyReading) || len(obj) != 1 {
+			t.Errorf("update object = %v, want only status_id", obj)
+		}
+		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": nil}}, nil
+	})
+	if err := c.UpdateUserBookStatus(context.Background(), 200, StatusCurrentlyReading, nil, nil); err != nil {
+		t.Errorf("UpdateUserBookStatus() error = %v", err)
+	}
+}

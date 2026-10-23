@@ -21,6 +21,7 @@ const (
 	StatusWantToRead       = 1
 	StatusCurrentlyReading = 2
 	StatusRead             = 3
+	StatusDidNotFinish     = 5
 )
 
 const defaultEndpoint = "https://api.hardcover.app/v1/graphql"

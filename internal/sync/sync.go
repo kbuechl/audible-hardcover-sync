@@ -33,6 +33,7 @@ type HardcoverClient interface {
 	UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error
 	FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error
 	ClearFinishDate(ctx context.Context, userBookID int64) error
+	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -185,6 +186,8 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			}
 			continue
 		}
+
+		slog.Info("added book to hardcover", "title", item.Title, "book_id", bookID, "status", status)
 
 		// Audible can mark a book finished without a date (e.g. "mark as
 		// finished" partway through). Hardcover would fill in today, so the

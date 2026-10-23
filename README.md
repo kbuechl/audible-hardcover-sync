@@ -27,6 +27,8 @@
   read on Hardcover instead of overwriting the old one.
 - **Never undoes your edits.** Books already on your Hardcover shelves keep
   their status, rating and dates; only listening progress moves forward.
+  Want to Read is the exception: start the audiobook and it moves to
+  Currently Reading.
 - **Matches it can't make alone wait for you.** The web UI suggests the
   likeliest Hardcover book; confirm it in one tap, on desktop or phone.
 - **Notifications** to Discord, Slack, ntfy, Telegram, email and
@@ -229,8 +231,8 @@ folder.
   threshold is set under **Setup → Preferences**: Strict (0.95, default),
   Medium (0.75) or Loose (0.55).
 - **Existing entries are skipped.** If a book is already in your Hardcover
-  library (any status — Read, Currently Reading, Want to Read), the sync
-  will NOT modify it:
+  library as Read, Currently Reading or Did Not Finish, the sync will NOT
+  modify it:
   - A book you read in print and marked Read will NOT be downgraded to
     Currently Reading when you start the audiobook on Audible.
   - A rating you set on Hardcover will NOT be overwritten by your Audible
@@ -239,6 +241,10 @@ folder.
   - The one exception is listening progress: for a book that is Currently
     Reading on Hardcover, progress is moved forward to match Audible on each
     sync. It is never lowered, and nothing else about the entry changes.
+  - Want to Read is moved up once you start listening: to Currently
+    Reading (with progress) while you listen, or to Read (with your Audible
+    finish date and rating) if Audible says you finished it. Custom lists
+    the book is on are left as they are.
   - Re-listens add a new read. When a book is Read on Hardcover and you
     start it again on Audible (back at 10% or less), or start the audiobook
     of a book you read elsewhere, the sync adds a new read to the entry,
