@@ -1002,3 +1002,29 @@ func describeCall(c upsertCall) string {
 	}
 	return out
 }
+
+// A book the app already recorded (same status, same percent) is normally
+// skipped before Hardcover is consulted. That skip must not hide a Want to
+// Read entry that still needs moving.
+func TestRun_PromotesWantToReadWithUnchangedProgress(t *testing.T) {
+	const isbn = "9780641723445"
+	fh := newFakeHardcover()
+	fh.byISBN[isbn] = 777
+	fh.userBooks[777] = hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusWantToRead}
+	store := newTestStore(t)
+	if err := store.Upsert(state.BookState{ASIN: "A1", Status: state.StatusInProgress, PercentComplete: 6, HardcoverBookID: int64Ptr(777)}); err != nil {
+		t.Fatalf("seed prior: %v", err)
+	}
+	item := audible.LibraryItem{ASIN: "A1", ISBN13: isbn, PercentComplete: 6, RuntimeSeconds: 10000}
+
+	result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{item}}, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result != (Result{Synced: 1}) {
+		t.Errorf("result = %+v, want Synced 1", result)
+	}
+	if got := fh.statusUpdates[200].statusID; got != hardcover.StatusCurrentlyReading {
+		t.Errorf("status = %d, want Currently Reading", got)
+	}
+}

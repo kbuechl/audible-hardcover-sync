@@ -112,7 +112,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
-		if prior != nil && !prior.Unmatched && prior.Status == status && !progressedSince(item, status, prior) {
+		if prior != nil && !prior.Unmatched && prior.Status == status && !progressedSince(item, status, prior) && !onWantToRead(userBooks, prior) {
 			result.Unchanged++
 			continue
 		}
@@ -322,6 +322,17 @@ func progressSeconds(item audible.LibraryItem) int {
 
 // progressedSince reports whether an in-progress book has moved forward on
 // Audible since the last recorded sync, so its progress should be pushed.
+// onWantToRead reports whether the Hardcover book recorded for prior is on
+// the user's Want to Read shelf, so it still needs moving even though
+// nothing changed on Audible.
+func onWantToRead(userBooks map[int64]hardcover.UserBook, prior *state.BookState) bool {
+	if prior.HardcoverBookID == nil {
+		return false
+	}
+	ub, ok := userBooks[*prior.HardcoverBookID]
+	return ok && ub.StatusID == hardcover.StatusWantToRead
+}
+
 func progressedSince(item audible.LibraryItem, status state.Status, prior *state.BookState) bool {
 	return status == state.StatusInProgress && item.PercentComplete > prior.PercentComplete
 }
