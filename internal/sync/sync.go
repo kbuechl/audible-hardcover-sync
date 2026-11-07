@@ -42,6 +42,8 @@ type HardcoverClient interface {
 // for real; sync.Run only depends on the interface shape.
 type Notifier interface {
 	NotifyUnmatched(ctx context.Context, items []state.BookState) error
+	// NotifyReview says count books are waiting for the user's review.
+	NotifyReview(ctx context.Context, count int) error
 }
 
 // Deps bundles Run's dependencies so they can be swapped for fakes in tests.

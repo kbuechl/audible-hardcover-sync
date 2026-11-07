@@ -111,10 +111,24 @@ func (a *App) Sync(ctx context.Context) (state.SyncReport, error) {
 	if err != nil {
 		return report, err
 	}
+	a.notifyWaiting(ctx, deps)
 	slog.Info("sync complete", "synced", result.Synced, "unchanged", result.Unchanged,
 		"unmatched", result.Unmatched, "errored", result.Errored,
 		"waiting", result.Waiting, "skipped", result.Skipped)
 	return report, nil
+}
+
+// notifyWaiting tells the user about books newly waiting for review. A
+// failure is logged, never returned: the sync itself succeeded.
+func (a *App) notifyWaiting(ctx context.Context, deps syncpkg.Deps) {
+	prefs, err := a.Preferences()
+	if err != nil {
+		slog.Error("read preferences for review message", "error", err)
+		return
+	}
+	if err := syncpkg.NotifyWaiting(ctx, a.store, deps.Notifier, prefs.SyncMode, prefs.ReviewNotify, time.Now()); err != nil {
+		slog.Error("notify books waiting for review", "error", err)
+	}
 }
 
 // syncDeps builds a sync's dependencies, failing with ErrNotConnected when

@@ -47,6 +47,33 @@ func (n *Notifier) NotifyUnmatched(ctx context.Context, items []state.BookState)
 	return nil
 }
 
+// NotifyReview sends one message saying count books wait for the user's
+// review. It is a no-op when no notification URLs are configured or count
+// is zero.
+func (n *Notifier) NotifyReview(ctx context.Context, count int) error {
+	if len(n.urls) == 0 || count <= 0 {
+		return nil
+	}
+	sender, err := shoutrrr.CreateSender(n.urls...)
+	if err != nil {
+		return fmt.Errorf("create notification sender: %w", err)
+	}
+	for _, sendErr := range sender.Send(buildReviewMessage(count, n.publicURL), nil) {
+		if sendErr != nil {
+			return fmt.Errorf("send notification: %w", sendErr)
+		}
+	}
+	return nil
+}
+
+func buildReviewMessage(count int, publicURL string) string {
+	msg := fmt.Sprintf("%d book(s) waiting for review on Hardcover sync", count)
+	if publicURL == "" {
+		return msg + ". Open the web UI to review them."
+	}
+	return msg + ": " + strings.TrimRight(publicURL, "/") + "/#review"
+}
+
 func buildMessage(items []state.BookState, publicURL string) string {
 	msg := fmt.Sprintf("%d book(s) need manual matching on Hardcover", len(items))
 	if publicURL == "" {
