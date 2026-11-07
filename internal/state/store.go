@@ -77,13 +77,13 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}
 	// The backfill must only run on the Open that creates review_books, so
-	// detect its absence before the schema creates it.
+	// detect its absence before initReviewBooks creates it.
 	reviewExisted, err := tableExists(db, "review_books")
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(schema + settingsSchema + reviewSchema); err != nil {
+	if _, err := db.Exec(schema + settingsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -97,7 +97,7 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	if !reviewExisted {
-		if err := backfillReviewBooks(db); err != nil {
+		if err := initReviewBooks(db, backfillReviewBooks); err != nil {
 			db.Close()
 			return nil, err
 		}

@@ -57,8 +57,8 @@ func tableExists(db *sql.DB, name string) (bool, error) {
 // backfillReviewBooks marks every book already synced to Hardcover as
 // Sync and notified, so upgrading doesn't flood the user with books they
 // have effectively approved. Run only on the Open that creates review_books.
-func backfillReviewBooks(db *sql.DB) error {
-	_, err := db.Exec(`
+func backfillReviewBooks(tx *sql.Tx) error {
+	_, err := tx.Exec(`
 		INSERT OR IGNORE INTO review_books
 			(asin, title, author, cover_url, status, percent_complete, decision, notified, first_seen)
 		SELECT asin, title, author, cover_url, status, percent_complete, ?, 1, ?
@@ -68,6 +68,23 @@ func backfillReviewBooks(db *sql.DB) error {
 		return fmt.Errorf("backfill review books: %w", err)
 	}
 	return nil
+}
+
+// initReviewBooks creates review_books and runs backfill in one transaction,
+// so a failure leaves no table behind and the next Open retries the backfill.
+func initReviewBooks(db *sql.DB, backfill func(*sql.Tx) error) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("init review books: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(reviewSchema); err != nil {
+		return fmt.Errorf("create review_books: %w", err)
+	}
+	if err := backfill(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func scanReviewBook(scanner func(dest ...any) error) (ReviewBook, error) {
