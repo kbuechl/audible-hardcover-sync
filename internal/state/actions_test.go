@@ -44,18 +44,23 @@ func TestRecordAction_RoundTrip(t *testing.T) {
 			if !reflect.DeepEqual(got[0], want) {
 				t.Errorf("Actions()[0] = %+v, want %+v", got[0], want)
 			}
-			if tt.in.Rating == nil && got[0].Rating != nil {
-				t.Errorf("Rating = %v, want nil", *got[0].Rating)
-			}
 		})
 	}
 }
 
-func TestActions_OldestFirst(t *testing.T) {
+// Actions come back in insertion order even when At is out of chronological
+// order or in mixed zones, since Remove replays them in the order recorded.
+func TestActions_InsertionOrder(t *testing.T) {
 	s := openTestStore(t)
-	for i, k := range []ActionKind{ActionInserted, ActionReadStarted, ActionPromoted} {
-		a := SyncAction{ASIN: "A1", Kind: k, At: time.Date(2026, 1, 1, 0, 0, 3-i, 0, time.UTC)}
-		if err := s.RecordAction(a); err != nil {
+	plus5 := time.FixedZone("plus5", 5*3600)
+	ats := []time.Time{
+		time.Date(2026, 1, 1, 0, 0, 3, 0, time.UTC),
+		time.Date(2026, 1, 1, 0, 0, 1, 500, time.UTC),
+		time.Date(2026, 1, 1, 4, 0, 2, 0, plus5), // 23:00:02 UTC the day before
+	}
+	kinds := []ActionKind{ActionInserted, ActionReadStarted, ActionPromoted}
+	for i, k := range kinds {
+		if err := s.RecordAction(SyncAction{ASIN: "A1", Kind: k, At: ats[i]}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -66,13 +71,18 @@ func TestActions_OldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var kinds []ActionKind
-	for _, a := range got {
-		kinds = append(kinds, a.Kind)
+	var gotKinds []ActionKind
+	for i, a := range got {
+		gotKinds = append(gotKinds, a.Kind)
+		if !a.At.Equal(ats[i]) {
+			t.Errorf("action %d At = %v, want instant %v", i, a.At, ats[i])
+		}
+		if a.At.Location() != time.UTC {
+			t.Errorf("action %d At zone = %v, want UTC", i, a.At.Location())
+		}
 	}
-	want := []ActionKind{ActionPromoted, ActionReadStarted, ActionInserted}
-	if !reflect.DeepEqual(kinds, want) {
-		t.Errorf("kinds = %v, want %v (oldest first, own ASIN only)", kinds, want)
+	if !reflect.DeepEqual(gotKinds, kinds) {
+		t.Errorf("kinds = %v, want %v (insertion order, own ASIN only)", gotKinds, kinds)
 	}
 }
 

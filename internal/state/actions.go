@@ -70,18 +70,19 @@ func (s *Store) RecordAction(a SyncAction) error {
 			(asin, kind, user_book_id, read_id, prev_status_id, prior_read_ids, created_read_ids, rating, at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ASIN, string(a.Kind), a.UserBookID, a.ReadID, a.PrevStatusID, string(prior), string(created),
-		rating, at.Format(time.RFC3339Nano))
+		rating, at.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("record action for %q: %w", a.ASIN, err)
 	}
 	return nil
 }
 
-// Actions returns the logged writes for asin, oldest first.
+// Actions returns the logged writes for asin in the order they were recorded,
+// which is the replay order Remove needs (At is informational only).
 func (s *Store) Actions(asin string) ([]SyncAction, error) {
 	rows, err := s.db.Query(`
 		SELECT id, asin, kind, user_book_id, read_id, prev_status_id, prior_read_ids, created_read_ids, rating, at
-		FROM sync_actions WHERE asin = ? ORDER BY at, id`, asin)
+		FROM sync_actions WHERE asin = ? ORDER BY id`, asin)
 	if err != nil {
 		return nil, fmt.Errorf("list actions for %q: %w", asin, err)
 	}
