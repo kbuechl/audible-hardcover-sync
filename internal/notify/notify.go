@@ -25,6 +25,10 @@ func New(urls []string, publicURL string) *Notifier {
 	return &Notifier{urls: urls, publicURL: publicURL}
 }
 
+// Configured reports whether any notification URL is set, i.e. whether a
+// message could actually be delivered.
+func (n *Notifier) Configured() bool { return len(n.urls) > 0 }
+
 // NotifyUnmatched sends a single summary notification for items that could
 // not be matched to a Hardcover book. It is a no-op when no notification
 // URLs are configured or when there are no items to report.

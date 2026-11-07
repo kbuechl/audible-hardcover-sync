@@ -20,6 +20,11 @@ const (
 // weekly stay quiet until that long after the last message. A send error
 // leaves the books unnotified so the next sync retries.
 func NotifyWaiting(ctx context.Context, store *state.Store, n Notifier, mode, freq string, now time.Time) error {
+	// With nowhere to send, keep the books unnotified so they are messaged
+	// once the user adds a notification target.
+	if !n.Configured() {
+		return nil
+	}
 	var gap time.Duration
 	switch freq {
 	case notifyOff:

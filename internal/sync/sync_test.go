@@ -207,6 +207,8 @@ func (f *fakeNotifier) NotifyUnmatched(ctx context.Context, items []state.BookSt
 	return nil
 }
 
+func (f *fakeNotifier) Configured() bool { return true }
+
 func (f *fakeNotifier) NotifyReview(ctx context.Context, count int) error { return nil }
 
 func newTestStore(t *testing.T) *state.Store {

@@ -10,9 +10,12 @@ import (
 )
 
 type reviewNotifier struct {
-	counts []int
-	err    error
+	counts       []int
+	err          error
+	unconfigured bool // true: Configured reports false
 }
+
+func (r *reviewNotifier) Configured() bool { return !r.unconfigured }
 
 func (r *reviewNotifier) NotifyUnmatched(context.Context, []state.BookState) error { return nil }
 func (r *reviewNotifier) NotifyReview(_ context.Context, count int) error {
@@ -71,21 +74,47 @@ func TestNotifyWaiting(t *testing.T) {
 		}
 	})
 
-	t.Run("weekly after quiet days sends only the new books", func(t *testing.T) {
+	t.Run("weekly waits 168h, then sends only the new books", func(t *testing.T) {
 		store, n := newTestStore(t), &reviewNotifier{}
 		seedWaiting(t, store, "A1", "A2")
-		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "weekly", now.Add(-15*24*time.Hour)); err != nil {
+		first := now.Add(-14 * 24 * time.Hour)
+		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "weekly", first); err != nil {
 			t.Fatal(err)
 		}
 		seedWaiting(t, store, "B1", "B2", "B3")
-		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "weekly", now.Add(-24*time.Hour)); err != nil {
+		// Inside 168h of the last message: nothing sent, books stay unnotified.
+		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "weekly", first.Add(167*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
-		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "weekly", now); err != nil {
+		if left, _ := store.UnnotifiedWaiting(); len(n.counts) != 1 || len(left) != 3 {
+			t.Fatalf("inside window: counts=%v unnotified=%d", n.counts, len(left))
+		}
+		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "weekly", first.Add(168*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
-		if len(n.counts) != 2 || n.counts[0] != 2 || n.counts[1] != 3 {
+		if len(n.counts) != 2 || n.counts[1] != 3 {
 			t.Errorf("counts = %v, want [2 3]", n.counts)
+		}
+	})
+
+	t.Run("unconfigured marks nothing, then configured sends all", func(t *testing.T) {
+		store, n := newTestStore(t), &reviewNotifier{unconfigured: true}
+		seedWaiting(t, store, "A1", "A2")
+		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "after_sync", now); err != nil {
+			t.Fatal(err)
+		}
+		if left, _ := store.UnnotifiedWaiting(); len(left) != 2 {
+			t.Fatalf("unnotified = %d, want 2", len(left))
+		}
+		if at, _ := store.ReviewNotifiedAt(); !at.IsZero() {
+			t.Fatalf("ReviewNotifiedAt = %v, want zero", at)
+		}
+		n.unconfigured = false
+		if err := NotifyWaiting(ctx, store, n, ModeConfirmAll, "after_sync", now); err != nil {
+			t.Fatal(err)
+		}
+		if len(n.counts) != 1 || n.counts[0] != 2 {
+			t.Errorf("counts = %v, want [2]", n.counts)
 		}
 	})
 

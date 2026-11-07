@@ -133,3 +133,9 @@ func TestNotifier_NotifyReview_NoOp(t *testing.T) {
 		t.Errorf("zero count: error = %v", err)
 	}
 }
+
+func TestNotifier_Configured(t *testing.T) {
+	if New(nil, "").Configured() || !New([]string{"x://y"}, "").Configured() {
+		t.Error("Configured() should follow whether URLs are set")
+	}
+}
