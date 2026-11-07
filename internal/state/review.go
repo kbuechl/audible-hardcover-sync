@@ -2,6 +2,7 @@ package state
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,9 @@ const (
 	DecisionSync      Decision = "sync"
 	DecisionNotWanted Decision = "not_wanted"
 )
+
+// ErrUnknownASIN is returned by SetDecision for an ASIN not in the review list.
+var ErrUnknownASIN = errors.New("unknown ASIN")
 
 // ReviewBook is one Audible book awaiting, or past, the user's review.
 type ReviewBook struct {
@@ -156,7 +160,7 @@ func (s *Store) SetDecision(asins []string, d Decision) error {
 		if n, err := res.RowsAffected(); err != nil {
 			return fmt.Errorf("set decision %q: %w", asin, err)
 		} else if n == 0 {
-			return fmt.Errorf("set decision: unknown ASIN %q", asin)
+			return fmt.Errorf("set decision: %w %q", ErrUnknownASIN, asin)
 		}
 	}
 	return tx.Commit()
