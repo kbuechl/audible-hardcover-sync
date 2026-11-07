@@ -27,6 +27,7 @@ type fakeService struct {
 	reviewItems []app.ReviewItem
 	waiting     int
 	decideErr   error
+	waitingErr  error
 	hidden      map[string]bool
 	gotFilter   string
 	gotQ        string
@@ -42,7 +43,7 @@ func (f *fakeService) SetReviewDecision(asins []string, d state.Decision) error 
 	f.gotASINs, f.gotDecision = asins, d
 	return f.decideErr
 }
-func (f *fakeService) WaitingCount() (int, error) { return f.waiting, nil }
+func (f *fakeService) WaitingCount() (int, error) { return f.waiting, f.waitingErr }
 func (f *fakeService) HiddenFromMatches([]string) (map[string]bool, error) {
 	return f.hidden, nil
 }

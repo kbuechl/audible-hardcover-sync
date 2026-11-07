@@ -144,3 +144,16 @@ func TestHiddenFromMatches(t *testing.T) {
 		t.Errorf("all hidden = %v, want only A4", got)
 	}
 }
+
+func TestHiddenFromMatches_UnseenBook(t *testing.T) {
+	a := newTestApp(t, nil)
+	seedReview(t, a, "confirm_all")
+	got, err := a.HiddenFromMatches([]string{"unseen"})
+	if err != nil || !got["unseen"] {
+		t.Errorf("confirm_all unseen hidden = %v, %v; want hidden", got, err)
+	}
+	seedReview(t, a, "confirm_shared")
+	if got, _ := a.HiddenFromMatches([]string{"unseen"}); got["unseen"] {
+		t.Errorf("confirm_shared unseen hidden = %v; want shown", got)
+	}
+}

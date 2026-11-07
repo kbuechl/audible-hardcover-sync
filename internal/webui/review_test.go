@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,6 +37,7 @@ func TestReviewEndpoints(t *testing.T) {
 		{"empty asins", svc(), "PUT", "/api/review/decision", `{"asins":[],"decision":"sync"}`, 400, `at least one`},
 		{"unknown asin", &fakeService{decideErr: state.ErrUnknownASIN}, "PUT", "/api/review/decision", `{"asins":["zz"],"decision":"sync"}`, 400, `unknown ASIN`},
 		{"bad body", svc(), "PUT", "/api/review/decision", `{`, 400, `invalid request body`},
+		{"status survives waiting error", &fakeService{waitingErr: errors.New("db"), waiting: 5}, "GET", "/api/status", "", 200, `"waiting":0`},
 		{"status has waiting", svc(), "GET", "/api/status", "", 200, `"waiting":3`},
 	}
 	for _, tt := range tests {

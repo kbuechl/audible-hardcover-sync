@@ -108,10 +108,12 @@ func (a *App) HiddenFromMatches(asins []string) (map[string]bool, error) {
 		if err != nil {
 			return nil, err
 		}
-		if rb == nil {
-			continue
+		// A book with no row is undecided and not shared.
+		shared, d := false, state.DecisionNone
+		if rb != nil {
+			shared, d = rb.Shared, rb.Decision
 		}
-		if rb.Decision == state.DecisionNotWanted || syncpkg.Held(p.SyncMode, rb.Shared, rb.Decision) {
+		if d == state.DecisionNotWanted || syncpkg.Held(p.SyncMode, shared, d) {
 			hidden[asin] = true
 		}
 	}

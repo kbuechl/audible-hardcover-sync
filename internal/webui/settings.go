@@ -87,10 +87,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// The count is secondary; the rest of the status must still load.
 	waiting, err := s.svc.WaitingCount()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		slog.Error("count books waiting for review", "error", err)
+		waiting = 0
 	}
 	writeJSON(w, http.StatusOK, statusDTO{
 		Audible:   s.svc.AudibleStatus(),
