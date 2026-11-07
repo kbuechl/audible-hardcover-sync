@@ -83,7 +83,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(schema + settingsSchema); err != nil {
+	if _, err := db.Exec(schema + settingsSchema + actionsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
