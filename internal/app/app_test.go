@@ -183,3 +183,41 @@ func TestPreferences(t *testing.T) {
 		t.Errorf("after save = %+v, interval %v", p, a.SyncInterval())
 	}
 }
+
+func TestPreferences_SyncModeAndReviewNotify(t *testing.T) {
+	a := newTestApp(t, nil)
+	p, err := a.Preferences()
+	if err != nil || p.SyncMode != "all" || p.ReviewNotify != "after_sync" {
+		t.Fatalf("defaults = %+v, %v", p, err)
+	}
+	base := state.Preferences{SyncInterval: "30m", MatchConfidence: "strict"}
+	for _, bad := range []state.Preferences{
+		{SyncInterval: base.SyncInterval, MatchConfidence: base.MatchConfidence, SyncMode: "bogus"},
+		{SyncInterval: base.SyncInterval, MatchConfidence: base.MatchConfidence, ReviewNotify: "bogus"},
+	} {
+		err := a.SavePreferences(bad)
+		if err == nil || !strings.Contains(err.Error(), "isn't one of the offered choices") {
+			t.Errorf("SavePreferences(%+v) error = %v", bad, err)
+		}
+	}
+	for _, mode := range SyncModes {
+		for _, notify := range ReviewNotifyOptions {
+			in := base
+			in.SyncMode, in.ReviewNotify = mode, notify
+			if err := a.SavePreferences(in); err != nil {
+				t.Fatalf("save %s/%s: %v", mode, notify, err)
+			}
+			got, _ := a.Preferences()
+			if got.SyncMode != mode || got.ReviewNotify != notify {
+				t.Errorf("round trip %s/%s = %+v", mode, notify, got)
+			}
+		}
+	}
+	// Older clients omit both fields; that means the defaults.
+	if err := a.SavePreferences(base); err != nil {
+		t.Fatalf("save without new fields: %v", err)
+	}
+	if got, _ := a.Preferences(); got.SyncMode != "all" || got.ReviewNotify != "after_sync" {
+		t.Errorf("empty values = %+v", got)
+	}
+}

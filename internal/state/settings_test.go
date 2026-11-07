@@ -67,3 +67,17 @@ func TestSettings_PreferencesRoundTrip(t *testing.T) {
 		t.Errorf("Preferences() = %+v, %v, want %+v", got, err, want)
 	}
 }
+
+func TestSettings_ReviewNotifiedAt(t *testing.T) {
+	s := openTestStore(t)
+	if got, err := s.ReviewNotifiedAt(); err != nil || !got.IsZero() {
+		t.Fatalf("ReviewNotifiedAt() before set = %v, %v", got, err)
+	}
+	want := time.Date(2026, 11, 7, 8, 9, 10, 0, time.UTC)
+	if err := s.SetReviewNotifiedAt(want); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ReviewNotifiedAt(); err != nil || !got.Equal(want) {
+		t.Errorf("ReviewNotifiedAt() = %v, %v, want %v", got, err, want)
+	}
+}

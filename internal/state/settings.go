@@ -21,6 +21,7 @@ const (
 	keyNotifyURLs  = "notify_urls"
 	keyLastSync    = "last_sync"
 	keyPreferences = "preferences"
+	keyReviewSent  = "review_notified_at"
 )
 
 // Preferences are the general settings made in the web UI. Empty fields
@@ -29,6 +30,8 @@ type Preferences struct {
 	SyncInterval    string `json:"syncInterval"`
 	MatchConfidence string `json:"matchConfidence"`
 	PublicURL       string `json:"publicUrl"`
+	SyncMode        string `json:"syncMode"`
+	ReviewNotify    string `json:"reviewNotify"`
 }
 
 // SyncReport is the outcome of the most recent sync, shown in the web UI.
@@ -94,6 +97,19 @@ func (s *Store) Preferences() (Preferences, error) {
 // SetPreferences replaces the saved general settings.
 func (s *Store) SetPreferences(p Preferences) error {
 	return s.setJSON(keyPreferences, p)
+}
+
+// ReviewNotifiedAt is when the last "books waiting for review" message was
+// sent; zero before the first.
+func (s *Store) ReviewNotifiedAt() (time.Time, error) {
+	var t time.Time
+	_, err := s.getJSON(keyReviewSent, &t)
+	return t, err
+}
+
+// SetReviewNotifiedAt records when a review message was last sent.
+func (s *Store) SetReviewNotifiedAt(t time.Time) error {
+	return s.setJSON(keyReviewSent, t)
 }
 
 // LastSync returns the most recent sync's report, or nil before the first.
