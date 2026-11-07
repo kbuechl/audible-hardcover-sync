@@ -54,6 +54,10 @@ type Book struct {
 	ContentDeliveryType string         `json:"content_delivery_type"`
 	ContentType         string         `json:"content_type"`
 	IsAyce              bool           `json:"is_ayce"`
+	// OriginType is how the title reached the library, e.g. "Purchase",
+	// "Sharing" (shared household book), or "AudibleComplimentaryOriginal".
+	// Populated only when the "origin_asin" response group is requested.
+	OriginType string `json:"origin_type"`
 
 	// ListeningStatus captures listening progress data from the
 	// "listening_status" response group, including the timestamp when

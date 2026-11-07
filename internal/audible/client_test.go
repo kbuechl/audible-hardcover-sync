@@ -2,6 +2,7 @@ package audible
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	audiblesdk "github.com/mstrhakr/go-audible"
@@ -161,5 +162,32 @@ func TestToLibraryItem_RuntimeSeconds(t *testing.T) {
 	item := toLibraryItem(audiblesdk.Book{ASIN: "B1", RuntimeMinutes: 924})
 	if item.RuntimeSeconds != 924*60 {
 		t.Errorf("RuntimeSeconds = %d, want %d", item.RuntimeSeconds, 924*60)
+	}
+}
+
+func TestToLibraryItem_Shared(t *testing.T) {
+	tests := []struct {
+		name       string
+		originType string
+		want       bool
+	}{
+		{name: "sharing", originType: "Sharing", want: true},
+		{name: "purchase", originType: "Purchase", want: false},
+		{name: "complimentary", originType: "AudibleComplimentaryOriginal", want: false},
+		{name: "absent", originType: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := toLibraryItem(audiblesdk.Book{ASIN: "B1", OriginType: tt.originType})
+			if item.Shared != tt.want {
+				t.Errorf("Shared = %v, want %v for origin_type %q", item.Shared, tt.want, tt.originType)
+			}
+		})
+	}
+}
+
+func TestResponseGroupsIncludeOrigin(t *testing.T) {
+	if !slices.Contains(responseGroups, "origin_asin") {
+		t.Errorf("responseGroups missing %q; got %v", "origin_asin", responseGroups)
 	}
 }

@@ -40,12 +40,20 @@ type LibraryItem struct {
 	// RuntimeSeconds is the audiobook's length, used to turn
 	// PercentComplete into Hardcover's progress_seconds. 0 if unknown.
 	RuntimeSeconds int
+	// Shared is true when the book was shared into the household library
+	// (Audible origin_type "Sharing") rather than purchased by this account.
+	Shared bool
 }
+
+// originTypeSharing is the Audible origin_type of a book shared into the
+// household library rather than purchased by the account.
+const originTypeSharing = "Sharing"
 
 // responseGroups extends the SDK's default set (WithResponseGroups replaces
 // rather than merges, so the defaults must be repeated here explicitly).
 var responseGroups = slices.Concat(audiblesdk.DefaultResponseGroups, []string{
 	"listening_status", "percent_complete", "is_finished", "provided_review",
+	"origin_asin",
 })
 
 type Client struct {
@@ -143,6 +151,7 @@ func toLibraryItem(b audiblesdk.Book) LibraryItem {
 		Rating:          rating,
 		CoverURL:        cmp.Or(b.ProductImages.Image500, b.ProductImages.Image1024),
 		RuntimeSeconds:  b.RuntimeMinutes * 60,
+		Shared:          b.OriginType == originTypeSharing,
 	}
 }
 
