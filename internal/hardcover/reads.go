@@ -108,3 +108,23 @@ func (c *Client) ClearFinishDate(ctx context.Context, userBookID int64) error {
 	}
 	return c.updateRead(ctx, readID, map[string]any{"finished_at": nil})
 }
+
+// ReadIDs returns the ids of every read on a user_book.
+func (c *Client) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error) {
+	var out struct {
+		Reads []struct {
+			ID int64 `json:"id"`
+		} `json:"user_book_reads"`
+	}
+	q := `query ReadIDs($id: Int!) {
+		user_book_reads(where: {user_book_id: {_eq: $id}}) { id }
+	}`
+	if err := c.do(ctx, q, map[string]any{"id": userBookID}, &out); err != nil {
+		return nil, fmt.Errorf("list user_book_reads: %w", err)
+	}
+	ids := make([]int64, len(out.Reads))
+	for i, r := range out.Reads {
+		ids[i] = r.ID
+	}
+	return ids, nil
+}

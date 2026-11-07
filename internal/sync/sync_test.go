@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -49,6 +50,9 @@ type fakeHardcover struct {
 	clearedDates       []int64             // user_book ids passed to ClearFinishDate
 	nextReadID         int64
 	statusUpdates      map[int64]upsertCall // user_book id → UpdateUserBookStatus call
+	existingReads      map[int64][]int64    // user_book id → reads already on Hardcover
+	progressReads      map[int64]int64      // user_book id → read created by SetReadProgress
+	nextProgressReadID int64
 }
 
 type fakeRead struct {
@@ -71,6 +75,9 @@ func newFakeHardcover() *fakeHardcover {
 		reads:              map[int64]*fakeRead{},
 		nextReadID:         9000,
 		statusUpdates:      map[int64]upsertCall{},
+		existingReads:      map[int64][]int64{},
+		progressReads:      map[int64]int64{},
+		nextProgressReadID: 7000,
 	}
 }
 
@@ -134,7 +141,25 @@ func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, p
 		return f.progressErr
 	}
 	f.progress[userBookID] = fallbackSeconds
+	// Like Hardcover, the first progress on a book without reads adds one.
+	if _, ok := f.progressReads[userBookID]; !ok && len(f.existingReads[userBookID]) == 0 {
+		f.nextProgressReadID++
+		f.progressReads[userBookID] = f.nextProgressReadID
+	}
 	return nil
+}
+
+func (f *fakeHardcover) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error) {
+	ids := slices.Clone(f.existingReads[userBookID])
+	if id, ok := f.progressReads[userBookID]; ok {
+		ids = append(ids, id)
+	}
+	for id, r := range f.reads {
+		if r.userBookID == userBookID {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 // StartRead mirrors the real client's dedupe: an open read on the same

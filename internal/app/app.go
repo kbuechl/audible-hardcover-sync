@@ -112,7 +112,8 @@ func (a *App) Sync(ctx context.Context) (state.SyncReport, error) {
 		return report, err
 	}
 	slog.Info("sync complete", "synced", result.Synced, "unchanged", result.Unchanged,
-		"unmatched", result.Unmatched, "errored", result.Errored)
+		"unmatched", result.Unmatched, "errored", result.Errored,
+		"waiting", result.Waiting, "skipped", result.Skipped)
 	return report, nil
 }
 
@@ -141,6 +142,7 @@ func (a *App) syncDeps() (syncpkg.Deps, error) {
 		Store:           a.store,
 		Notifier:        notify.New(urls, prefs.PublicURL),
 		MatchConfidence: matchConfidences[prefs.MatchConfidence],
+		SyncMode:        prefs.SyncMode,
 	}, nil
 }
 

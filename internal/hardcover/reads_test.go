@@ -134,3 +134,19 @@ func TestClient_UpdateUserBookStatus_StatusOnly(t *testing.T) {
 		t.Errorf("UpdateUserBookStatus() error = %v", err)
 	}
 }
+
+func TestClient_ReadIDs(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if !strings.Contains(query, "user_book_reads") || vars["id"] != float64(200) {
+			t.Errorf("query = %q vars = %v", query, vars)
+		}
+		return map[string]any{"user_book_reads": []map[string]any{{"id": 11}, {"id": 12}}}, nil
+	})
+	ids, err := c.ReadIDs(context.Background(), 200)
+	if err != nil {
+		t.Fatalf("ReadIDs() error = %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 11 || ids[1] != 12 {
+		t.Errorf("ReadIDs() = %v, want [11 12]", ids)
+	}
+}
