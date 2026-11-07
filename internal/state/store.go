@@ -38,8 +38,7 @@ type Store struct {
 
 // schema creates the sync_state table. NOTE: the rating column was removed
 // from this schema (2026-08-02) as dead code. Pre-existing databases still
-// carry the column, but no migration is run — the state DB is ephemeral and
-// gets recreated on container restart.
+// carry the column; columns added since are migrated by addColumn in Open.
 const schema = `
 CREATE TABLE IF NOT EXISTS sync_state (
     asin TEXT PRIMARY KEY,
@@ -77,7 +76,14 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}
-	if _, err := db.Exec(schema + settingsSchema); err != nil {
+	// The backfill must only run on the Open that creates review_books, so
+	// detect its absence before the schema creates it.
+	reviewExisted, err := tableExists(db, "review_books")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(schema + settingsSchema + reviewSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -86,6 +92,12 @@ func Open(path string) (*Store, error) {
 		"relisten_read_id": `relisten_read_id INTEGER`,
 	} {
 		if err := addColumn(db, name, ddl); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if !reviewExisted {
+		if err := backfillReviewBooks(db); err != nil {
 			db.Close()
 			return nil, err
 		}
