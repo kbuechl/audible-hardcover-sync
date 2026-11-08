@@ -46,6 +46,10 @@ func TestReviewEndpoints(t *testing.T) {
 		{"remove during sync", &fakeService{removeErr: app.ErrSyncRunning}, "POST", "/api/review/A1/remove", "", 409, `already running`},
 		{"remove hardcover error", &fakeService{removeErr: errors.New("hardcover down")}, "POST", "/api/review/A1/remove", "", 500, `hardcover down`},
 		{"status has waiting", svc(), "GET", "/api/status", "", 200, `"waiting":3`},
+		{"empty asin entry", svc(), "PUT", "/api/review/decision", `{"asins":[""],"decision":"sync"}`, 400, `invalid ASIN`},
+		{"too many asins", svc(), "PUT", "/api/review/decision", `{"asins":[` + strings.TrimSuffix(strings.Repeat(`"A1",`, 1001), ",") + `],"decision":"sync"}`, 400, `at most 1000`},
+		{"remove preview bad asin", svc(), "GET", "/api/review/%20/remove", "", 400, `invalid ASIN`},
+		{"remove bad asin", svc(), "POST", "/api/review/" + strings.Repeat("A", 33) + "/remove", "", 400, `invalid ASIN`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,9 +63,9 @@ func TestReviewEndpoints(t *testing.T) {
 
 func TestRemovePassesASIN(t *testing.T) {
 	svc := &fakeService{}
-	serve(t, svc, "POST", "/api/review/B0%2F1/remove", "")
-	if svc.removed != "B0/1" {
-		t.Errorf("service removed %q, want B0/1", svc.removed)
+	serve(t, svc, "POST", "/api/review/B01/remove", "")
+	if svc.removed != "B01" {
+		t.Errorf("service removed %q, want B01", svc.removed)
 	}
 }
 

@@ -2,11 +2,34 @@ package webui
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/app"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
 )
+
+// maxDecisionASINs caps one decision request; maxASINLen bounds an ASIN.
+const (
+	maxDecisionASINs = 1000
+	maxASINLen       = 32
+)
+
+var errInvalidASIN = errors.New("invalid ASIN")
+
+// validASIN reports whether s looks like an ASIN: 1 to maxASINLen letters
+// and digits.
+func validASIN(s string) bool {
+	if s == "" || len(s) > maxASINLen {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
 
 type reviewBookDTO struct {
 	ASIN            string  `json:"asin"`
@@ -63,6 +86,16 @@ func (s *Server) handleReviewDecision(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("choose at least one book"))
 		return
 	}
+	if len(req.ASINs) > maxDecisionASINs {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("choose at most %d books", maxDecisionASINs))
+		return
+	}
+	for _, asin := range req.ASINs {
+		if !validASIN(asin) {
+			writeError(w, http.StatusBadRequest, errInvalidASIN)
+			return
+		}
+	}
 	err := s.svc.SetReviewDecision(req.ASINs, d)
 	if errors.Is(err, state.ErrUnknownASIN) {
 		writeError(w, http.StatusBadRequest, err)
@@ -92,7 +125,12 @@ func removeStatus(err error) int {
 }
 
 func (s *Server) handleRemovePreview(w http.ResponseWriter, r *http.Request) {
-	p, err := s.svc.PreviewRemove(r.Context(), r.PathValue("asin"))
+	asin := r.PathValue("asin")
+	if !validASIN(asin) {
+		writeError(w, http.StatusBadRequest, errInvalidASIN)
+		return
+	}
+	p, err := s.svc.PreviewRemove(r.Context(), asin)
 	if err != nil {
 		writeError(w, removeStatus(err), err)
 		return
@@ -108,7 +146,12 @@ func (s *Server) handleRemovePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemove(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.Remove(r.Context(), r.PathValue("asin")); err != nil {
+	asin := r.PathValue("asin")
+	if !validASIN(asin) {
+		writeError(w, http.StatusBadRequest, errInvalidASIN)
+		return
+	}
+	if err := s.svc.Remove(r.Context(), asin); err != nil {
 		writeError(w, removeStatus(err), err)
 		return
 	}
