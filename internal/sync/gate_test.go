@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"os"
 	"slices"
 	"testing"
 
@@ -253,6 +254,28 @@ func TestRun_AdoptedReadNotRecorded(t *testing.T) {
 	runMode(t, "all", items, fh, store, &fakeNotifier{})
 	if acts, _ := store.Actions("REL"); len(acts) != 0 {
 		t.Errorf("actions = %+v, want none for an adopted read", acts)
+	}
+}
+
+// TestMain keeps the wait for Hardcover's late reads out of the tests.
+func TestMain(m *testing.M) {
+	insertedReadDelay = 0
+	os.Exit(m.Run())
+}
+
+// Hardcover adds the read for a book inserted as Read a moment after the
+// insert returns. The sync must still log that read as its own.
+func TestRun_InsertRecordsLateRead(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"FIN": 777}
+	fh.insertRead, fh.readLag = true, 2
+	store := newTestStore(t)
+	items := []audible.LibraryItem{{ASIN: "FIN", IsFinished: true, PercentComplete: 100, FinishedAt: ptrTime("2026-10-01T00:00:00Z")}}
+	runMode(t, "all", items, fh, store, &fakeNotifier{})
+
+	ins := onlyAction(t, store, "FIN")
+	if want := fh.existingReads[ins.UserBookID]; !slices.Equal(ins.CreatedReadIDs, want) || len(want) != 1 {
+		t.Errorf("insert action CreatedReadIDs = %v, want %v", ins.CreatedReadIDs, want)
 	}
 }
 

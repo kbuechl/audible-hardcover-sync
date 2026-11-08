@@ -53,6 +53,12 @@ type fakeHardcover struct {
 	existingReads      map[int64][]int64    // user_book id → reads already on Hardcover
 	progressReads      map[int64]int64      // user_book id → read created by SetReadProgress
 	nextProgressReadID int64
+	// insertRead, when set, makes InsertUserBook with status Read add a
+	// read the way Hardcover does: after the call returns, so ReadIDs
+	// misses it for the first readLag calls.
+	insertRead bool
+	readLag    int
+	lagCalls   map[int64]int // user_book id → ReadIDs calls so far
 }
 
 type fakeRead struct {
@@ -133,6 +139,13 @@ func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, status
 	}
 	f.inserted[bookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
 	f.nextUserBookID++
+	if f.insertRead && statusID == hardcover.StatusRead {
+		f.nextReadID++
+		f.existingReads[f.nextUserBookID] = []int64{f.nextReadID}
+		if f.lagCalls == nil {
+			f.lagCalls = map[int64]int{}
+		}
+	}
 	return f.nextUserBookID, nil
 }
 
@@ -150,6 +163,13 @@ func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, p
 }
 
 func (f *fakeHardcover) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error) {
+	if f.lagCalls != nil {
+		n := f.lagCalls[userBookID]
+		f.lagCalls[userBookID] = n + 1
+		if n < f.readLag {
+			return nil, nil
+		}
+	}
 	ids := slices.Clone(f.existingReads[userBookID])
 	if id, ok := f.progressReads[userBookID]; ok {
 		ids = append(ids, id)

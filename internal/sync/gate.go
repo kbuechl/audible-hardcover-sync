@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
@@ -98,6 +99,31 @@ func readIDs(ctx context.Context, d Deps, item audible.LibraryItem, userBookID i
 		return nil, false
 	}
 	return ids, true
+}
+
+// insertedReadPolls and insertedReadDelay bound the wait for the read
+// Hardcover adds to a book inserted as Read. It adds
+// it a moment after insert_user_book returns (seen at ~0.2s empty, ~0.6s
+// present), so an immediate listing can miss it and Remove would later
+// call it a read the user added. A var so tests need not sleep.
+const insertedReadPolls = 5
+
+var insertedReadDelay = 400 * time.Millisecond
+
+// insertedReadIDs lists the reads on a just-inserted user_book, waiting
+// briefly while there are none yet.
+func insertedReadIDs(ctx context.Context, d Deps, item audible.LibraryItem, userBookID int64) []int64 {
+	for i := 0; ; i++ {
+		ids, ok := readIDs(ctx, d, item, userBookID)
+		if !ok || len(ids) > 0 || i == insertedReadPolls-1 {
+			return ids
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(insertedReadDelay):
+		}
+	}
 }
 
 // createdSince returns the ids in after that are not in before.

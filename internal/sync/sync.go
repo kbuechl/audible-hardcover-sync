@@ -238,7 +238,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		}
 
 		// Every read on a just-inserted book was made by this sync.
-		created, _ := readIDs(ctx, d, item, userBookID)
+		created := insertedReadIDs(ctx, d, item, userBookID)
 		recordAction(d, state.SyncAction{
 			ASIN: item.ASIN, Kind: state.ActionInserted, UserBookID: userBookID,
 			Rating: item.Rating, CreatedReadIDs: created,
