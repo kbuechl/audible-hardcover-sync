@@ -45,6 +45,8 @@ type App struct {
 	syncing atomic.Bool
 
 	prefsChanged chan struct{}
+
+	removeHC hardcoverRemover // test seam for Remove; nil uses hc
 }
 
 // New loads the Hardcover token (from the environment, or the one saved

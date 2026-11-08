@@ -40,6 +40,8 @@ type Service interface {
 	// HiddenFromMatches returns the ASINs among asins that the Matches
 	// list should hide (Not wanted, or held under the current mode).
 	HiddenFromMatches(asins []string) (map[string]bool, error)
+	PreviewRemove(ctx context.Context, asin string) (app.RemovePreview, error)
+	Remove(ctx context.Context, asin string) error
 }
 
 // WithService adds the setup, sync and notification endpoints, and makes
@@ -66,6 +68,8 @@ func (s *Server) registerServiceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/preferences", s.handlePreferencesPut)
 	mux.HandleFunc("GET /api/review", s.handleReviewList)
 	mux.HandleFunc("PUT /api/review/decision", s.handleReviewDecision)
+	mux.HandleFunc("GET /api/review/{asin}/remove", s.handleRemovePreview)
+	mux.HandleFunc("POST /api/review/{asin}/remove", s.handleRemove)
 }
 
 type statusDTO struct {

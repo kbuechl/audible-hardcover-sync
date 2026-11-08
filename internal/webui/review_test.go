@@ -38,6 +38,13 @@ func TestReviewEndpoints(t *testing.T) {
 		{"unknown asin", &fakeService{decideErr: state.ErrUnknownASIN}, "PUT", "/api/review/decision", `{"asins":["zz"],"decision":"sync"}`, 400, `unknown ASIN`},
 		{"bad body", svc(), "PUT", "/api/review/decision", `{`, 400, `invalid request body`},
 		{"status survives waiting error", &fakeService{waitingErr: errors.New("db"), waiting: 5}, "GET", "/api/status", "", 200, `"waiting":0`},
+		{"remove preview", &fakeService{preview: app.RemovePreview{Deletes: []string{"the book"}, AlsoDeletes: []string{"your review"}}}, "GET", "/api/review/A1/remove", "", 200, `{"deletes":["the book"],"alsoDeletes":["your review"]}`},
+		{"remove preview empty lists", &fakeService{}, "GET", "/api/review/A1/remove", "", 200, `{"deletes":[],"alsoDeletes":[]}`},
+		{"remove preview nothing logged", &fakeService{removeErr: app.ErrNothingToRemove}, "GET", "/api/review/A1/remove", "", 404, `not added`},
+		{"remove", svc(), "POST", "/api/review/A1/remove", "", 204, ""},
+		{"remove nothing logged", &fakeService{removeErr: app.ErrNothingToRemove}, "POST", "/api/review/A1/remove", "", 404, `not added`},
+		{"remove during sync", &fakeService{removeErr: app.ErrSyncRunning}, "POST", "/api/review/A1/remove", "", 409, `already running`},
+		{"remove hardcover error", &fakeService{removeErr: errors.New("hardcover down")}, "POST", "/api/review/A1/remove", "", 500, `hardcover down`},
 		{"status has waiting", svc(), "GET", "/api/status", "", 200, `"waiting":3`},
 	}
 	for _, tt := range tests {
@@ -47,6 +54,14 @@ func TestReviewEndpoints(t *testing.T) {
 				t.Errorf("%s %s = %d %s, want %d containing %q", tt.method, tt.path, code, body, tt.wantCode, tt.wantBody)
 			}
 		})
+	}
+}
+
+func TestRemovePassesASIN(t *testing.T) {
+	svc := &fakeService{}
+	serve(t, svc, "POST", "/api/review/B0%2F1/remove", "")
+	if svc.removed != "B0/1" {
+		t.Errorf("service removed %q, want B0/1", svc.removed)
 	}
 }
 

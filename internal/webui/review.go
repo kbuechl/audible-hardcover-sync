@@ -74,3 +74,43 @@ func (s *Server) handleReviewDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+type removePreviewDTO struct {
+	Deletes     []string `json:"deletes"`
+	AlsoDeletes []string `json:"alsoDeletes"`
+}
+
+// removeStatus maps a Remove error to an HTTP status.
+func removeStatus(err error) int {
+	switch {
+	case errors.Is(err, app.ErrNothingToRemove):
+		return http.StatusNotFound
+	case errors.Is(err, app.ErrSyncRunning):
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
+}
+
+func (s *Server) handleRemovePreview(w http.ResponseWriter, r *http.Request) {
+	p, err := s.svc.PreviewRemove(r.Context(), r.PathValue("asin"))
+	if err != nil {
+		writeError(w, removeStatus(err), err)
+		return
+	}
+	dto := removePreviewDTO{Deletes: p.Deletes, AlsoDeletes: p.AlsoDeletes}
+	if dto.Deletes == nil {
+		dto.Deletes = []string{}
+	}
+	if dto.AlsoDeletes == nil {
+		dto.AlsoDeletes = []string{}
+	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
+func (s *Server) handleRemove(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.Remove(r.Context(), r.PathValue("asin")); err != nil {
+		writeError(w, removeStatus(err), err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

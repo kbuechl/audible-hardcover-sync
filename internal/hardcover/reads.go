@@ -128,3 +128,74 @@ func (c *Client) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error)
 	}
 	return ids, nil
 }
+
+// UserBookDetails is what a library entry holds beyond its status: the
+// data Remove would take with it.
+type UserBookDetails struct {
+	Rating    *float64
+	HasReview bool
+	HasNotes  bool
+	ReadIDs   []int64
+}
+
+// UserBookDetails returns the rating, review and notes flags and read ids
+// of one library entry, or nil when the entry no longer exists.
+func (c *Client) UserBookDetails(ctx context.Context, userBookID int64) (*UserBookDetails, error) {
+	var out struct {
+		Books []struct {
+			Rating       *float64 `json:"rating"`
+			HasReview    bool     `json:"has_review"`
+			PrivateNotes *string  `json:"private_notes"`
+			Reads        []struct {
+				ID int64 `json:"id"`
+			} `json:"user_book_reads"`
+		} `json:"user_books"`
+	}
+	q := `query UserBookDetails($id: Int!) {
+		user_books(where: {id: {_eq: $id}}) { rating has_review private_notes user_book_reads { id } }
+	}`
+	if err := c.do(ctx, q, map[string]any{"id": userBookID}, &out); err != nil {
+		return nil, fmt.Errorf("fetch user_book details: %w", err)
+	}
+	if len(out.Books) == 0 {
+		return nil, nil
+	}
+	b := out.Books[0]
+	d := &UserBookDetails{
+		Rating:    b.Rating,
+		HasReview: b.HasReview,
+		HasNotes:  b.PrivateNotes != nil && *b.PrivateNotes != "",
+		ReadIDs:   make([]int64, len(b.Reads)),
+	}
+	for i, r := range b.Reads {
+		d.ReadIDs[i] = r.ID
+	}
+	return d, nil
+}
+
+// DeleteUserBook removes a library entry and, with it, its reads. An entry
+// that is already gone (null result) counts as deleted.
+func (c *Client) DeleteUserBook(ctx context.Context, userBookID int64) error {
+	return c.deleteByID(ctx, "delete_user_book", userBookID)
+}
+
+// DeleteRead removes one read. A read that is already gone (null result)
+// counts as deleted.
+func (c *Client) DeleteRead(ctx context.Context, readID int64) error {
+	return c.deleteByID(ctx, "delete_user_book_read", readID)
+}
+
+// deleteByID runs a delete mutation. Unlike the insert and update
+// mutations, the delete results have no "error" field (Task 0 spike): a
+// failure surfaces as a GraphQL error, and a null result means the row was
+// already gone.
+func (c *Client) deleteByID(ctx context.Context, mutation string, id int64) error {
+	var out map[string]*struct {
+		ID int64 `json:"id"`
+	}
+	m := fmt.Sprintf(`mutation Delete($id: Int!) { %s(id: $id) { id } }`, mutation)
+	if err := c.do(ctx, m, map[string]any{"id": id}, &out); err != nil {
+		return fmt.Errorf("%s: %w", mutation, err)
+	}
+	return nil
+}

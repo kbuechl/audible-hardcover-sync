@@ -2,6 +2,8 @@ package hardcover
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -150,3 +152,75 @@ func TestClient_ReadIDs(t *testing.T) {
 		t.Errorf("ReadIDs() = %v, want [11 12]", ids)
 	}
 }
+
+func TestClient_DeleteUserBookAndRead(t *testing.T) {
+	tests := []struct {
+		name   string
+		field  string
+		call   func(c *Client) error
+		result any
+	}{
+		{"delete entry", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, map[string]any{"id": 200}},
+		{"delete entry already gone", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, nil},
+		{"delete read", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, map[string]any{"id": 200}},
+		{"delete read already gone", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+				if !strings.Contains(query, tt.field+"(") || vars["id"] != float64(200) {
+					t.Errorf("query = %q vars = %v", query, vars)
+				}
+				return map[string]any{tt.field: tt.result}, nil
+			})
+			if err := tt.call(c); err != nil {
+				t.Errorf("error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestClient_DeleteUserBook_SurfacesGraphQLError(t *testing.T) {
+	_, c := newTestServer(t, func(string, map[string]any) (any, error) {
+		return nil, errors.New("not yours")
+	})
+	if err := c.DeleteUserBook(context.Background(), 200); err == nil || !strings.Contains(err.Error(), "not yours") {
+		t.Errorf("DeleteUserBook() error = %v, want graphql error", err)
+	}
+	if err := c.DeleteRead(context.Background(), 200); err == nil || !strings.Contains(err.Error(), "not yours") {
+		t.Errorf("DeleteRead() error = %v, want graphql error", err)
+	}
+}
+
+func TestClient_UserBookDetails(t *testing.T) {
+	tests := []struct {
+		name  string
+		books []map[string]any
+		want  *UserBookDetails
+	}{
+		{"gone", []map[string]any{}, nil},
+		{"bare entry", []map[string]any{{"rating": nil, "has_review": false, "private_notes": nil, "user_book_reads": []map[string]any{}}}, &UserBookDetails{ReadIDs: []int64{}}},
+		{"rated reviewed with notes and reads", []map[string]any{{"rating": 4.5, "has_review": true, "private_notes": "hm", "user_book_reads": []map[string]any{{"id": 11}, {"id": 12}}}},
+			&UserBookDetails{Rating: ptrF(4.5), HasReview: true, HasNotes: true, ReadIDs: []int64{11, 12}}},
+		{"empty notes are no notes", []map[string]any{{"rating": nil, "has_review": false, "private_notes": "", "user_book_reads": []map[string]any{}}}, &UserBookDetails{ReadIDs: []int64{}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+				if !strings.Contains(query, "user_books(") || vars["id"] != float64(200) {
+					t.Errorf("query = %q vars = %v", query, vars)
+				}
+				return map[string]any{"user_books": tt.books}, nil
+			})
+			got, err := c.UserBookDetails(context.Background(), 200)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("UserBookDetails() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func ptrF(f float64) *float64 { return &f }

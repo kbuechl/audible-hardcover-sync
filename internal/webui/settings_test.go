@@ -33,6 +33,18 @@ type fakeService struct {
 	gotQ        string
 	gotASINs    []string
 	gotDecision state.Decision
+
+	preview   app.RemovePreview
+	removeErr error
+	removed   string
+}
+
+func (f *fakeService) PreviewRemove(_ context.Context, asin string) (app.RemovePreview, error) {
+	return f.preview, f.removeErr
+}
+func (f *fakeService) Remove(_ context.Context, asin string) error {
+	f.removed = asin
+	return f.removeErr
 }
 
 func (f *fakeService) ReviewBooks(filter, q string) ([]app.ReviewItem, error) {
