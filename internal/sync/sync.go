@@ -237,7 +237,9 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			}
 		}
 
-		// Every read the insert returned was made by this sync.
+		// Every read the insert returned was made by this sync. A read
+		// SetReadProgress adds later is not claimed: Remove deletes the
+		// whole entry anyway, so at worst its preview over-counts.
 		recordAction(d, state.SyncAction{
 			ASIN: item.ASIN, Kind: state.ActionInserted, UserBookID: userBookID,
 			Rating: item.Rating, CreatedReadIDs: created,

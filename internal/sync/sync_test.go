@@ -58,6 +58,7 @@ type fakeHardcover struct {
 	// returns it, but ReadIDs right after does not list it yet.
 	insertRead bool
 	lateReads  map[int64]bool // read ids ReadIDs does not list yet
+	readIDsErr error          // returned by ReadIDs when set
 }
 
 type fakeRead struct {
@@ -160,6 +161,9 @@ func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, p
 }
 
 func (f *fakeHardcover) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error) {
+	if f.readIDsErr != nil {
+		return nil, f.readIDsErr
+	}
 	ids := slices.DeleteFunc(slices.Clone(f.existingReads[userBookID]), func(id int64) bool { return f.lateReads[id] })
 	if id, ok := f.progressReads[userBookID]; ok {
 		ids = append(ids, id)

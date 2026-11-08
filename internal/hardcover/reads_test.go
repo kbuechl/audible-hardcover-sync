@@ -231,3 +231,21 @@ func TestClient_UserBookDetails(t *testing.T) {
 }
 
 func ptrF(f float64) *float64 { return &f }
+
+// A mutation that returns no user_book yields no read ids, not a panic.
+func TestClient_NullUserBookReads(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "insert_user_book") {
+			return map[string]any{"insert_user_book": map[string]any{"id": 9, "user_book": nil}}, nil
+		}
+		return map[string]any{"update_user_book": map[string]any{"id": 9, "error": nil, "user_book": nil}}, nil
+	})
+	id, reads, err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil)
+	if err != nil || id != 9 || reads != nil {
+		t.Errorf("InsertUserBook() = %d, %v, %v; want 9, nil, nil", id, reads, err)
+	}
+	reads, err = c.UpdateUserBookStatus(context.Background(), 9, StatusRead, nil, nil)
+	if err != nil || reads != nil {
+		t.Errorf("UpdateUserBookStatus() = %v, %v; want nil, nil", reads, err)
+	}
+}

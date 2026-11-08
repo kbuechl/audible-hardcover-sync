@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -341,5 +342,23 @@ func TestRun_ConfirmSharedMixed(t *testing.T) {
 	}
 	if acts, _ := store.Actions("SH"); len(acts) != 0 {
 		t.Errorf("shared actions = %+v, want none", acts)
+	}
+}
+
+// When the reads before a promote cannot be listed, which reads are new
+// is unknown, so none are claimed and Remove cannot delete a user's read.
+func TestRun_PromoteClaimsNothingWithoutPriorReads(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"PRO": 888}
+	fh.userBooks[888] = hardcover.UserBook{ID: 60, StatusID: hardcover.StatusWantToRead}
+	fh.existingReads = map[int64][]int64{60: {600}}
+	fh.insertRead, fh.readIDsErr = true, errors.New("hardcover down")
+	store := newTestStore(t)
+	items := []audible.LibraryItem{{ASIN: "PRO", IsFinished: true, PercentComplete: 100, FinishedAt: ptrTime("2026-10-01T00:00:00Z")}}
+	runMode(t, "all", items, fh, store, &fakeNotifier{})
+
+	pro := onlyAction(t, store, "PRO")
+	if pro.Kind != state.ActionPromoted || len(pro.CreatedReadIDs) != 0 {
+		t.Errorf("promote action = %+v, want nothing created", pro)
 	}
 }

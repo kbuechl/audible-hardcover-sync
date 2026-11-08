@@ -200,6 +200,8 @@ func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, st
 			}
 		}
 	}
+	// A read SetReadProgress adds later is not claimed, so Remove leaves
+	// it (under-delete, safe).
 	// Without the reads from before the write, which reads are new is
 	// unknown, so none are claimed.
 	var created []int64
