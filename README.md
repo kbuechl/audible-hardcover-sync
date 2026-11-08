@@ -267,8 +267,9 @@ wanted**, with title search and select-all for bulk choices.
   books synced from this version on. A book the sync added is deleted from
   Hardcover, along with its reads. A book the sync moved up from Want to
   Read goes back to Want to Read, and only the reads the sync added are
-  deleted. Afterwards the book is Not wanted, so the next sync doesn't add
-  it again. If your own rating, review, notes or reads would go too, the
+  deleted; the rating the sync set stays. A re-listen read the sync
+  started is deleted too. Afterwards the book is Not wanted, so the next
+  sync doesn't add it again; set it back to Sync to re-add it. If your own rating, review, notes or reads would go too, the
   confirmation says so before anything is deleted. Anything you added on
   Hardcover yourself is otherwise left alone.
 
@@ -276,7 +277,7 @@ Your decisions survive **Reset sync history**.
 
 Under **Notifications → Books waiting for review**, pick how often to hear
 about waiting books: after each sync (default), once a day, once a week or
-never. Each book is mentioned once, and a message always covers all new
+Off. Each book is mentioned once, and a message always covers all new
 waiting books at once.
 
 ## Sync behavior
