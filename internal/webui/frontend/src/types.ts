@@ -41,4 +41,6 @@ export interface Preferences {
   syncInterval: string
   matchConfidence: 'strict' | 'medium' | 'loose'
   publicUrl: string
+  syncMode: 'all' | 'skip_shared' | 'confirm_shared' | 'confirm_all'
+  reviewNotify: 'after_sync' | 'daily' | 'weekly' | 'off'
 }

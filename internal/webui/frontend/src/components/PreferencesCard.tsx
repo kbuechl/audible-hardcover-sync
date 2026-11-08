@@ -21,6 +21,13 @@ const confidences: { value: Preferences['matchConfidence']; label: string; hint:
   { value: 'loose', label: 'Loose', hint: 'Matches more on its own, with a higher chance of a wrong book.' },
 ]
 
+const syncModes: { value: Preferences['syncMode']; label: string; hint: string }[] = [
+  { value: 'all', label: 'Sync everything', hint: 'Every book you start on Audible goes to Hardcover.' },
+  { value: 'skip_shared', label: 'Skip shared books', hint: 'Books shared from another Audible account are left out.' },
+  { value: 'confirm_shared', label: 'Confirm shared books', hint: 'Shared books wait on the Review page until you choose.' },
+  { value: 'confirm_all', label: 'Confirm every book', hint: 'Every new book waits on the Review page until you choose.' },
+]
+
 export default function PreferencesCard() {
   const [prefs, setPrefs] = useState<Preferences | null>(null)
   const [busy, setBusy] = useState(false)
@@ -101,6 +108,32 @@ export default function PreferencesCard() {
             ))}
           </div>
           <p className="text-xs text-muted">{confidences.find((c) => c.value === prefs.matchConfidence)?.hint}</p>
+        </fieldset>
+
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-semibold mb-1.5">Which books to sync</legend>
+          {syncModes.map((m) => (
+            <div key={m.value} className="flex items-start gap-2.5">
+              <input
+                type="radio"
+                id={`syncMode-${m.value}`}
+                name="syncMode"
+                value={m.value}
+                checked={prefs.syncMode === m.value}
+                onChange={() => update({ syncMode: m.value })}
+                aria-describedby={`syncMode-${m.value}-hint`}
+                className="mt-1 accent-pine"
+              />
+              <div className="flex flex-col">
+                <label htmlFor={`syncMode-${m.value}`} className="text-sm cursor-pointer">
+                  {m.label}
+                </label>
+                <span id={`syncMode-${m.value}-hint`} className="text-xs text-muted">
+                  {m.hint}
+                </span>
+              </div>
+            </div>
+          ))}
         </fieldset>
 
         <label className="flex flex-col gap-1.5">

@@ -14,7 +14,7 @@ const base: Status = {
 describe('SetupPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '' })
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'all', reviewNotify: 'after_sync' })
     vi.spyOn(window, 'open').mockReturnValue(null)
   })
 
@@ -55,5 +55,13 @@ describe('SetupPage', () => {
   it('disables Sync now until both services are connected', () => {
     render(<SetupPage status={base} onChanged={vi.fn()} />)
     expect(screen.getByRole('button', { name: /sync now/i })).toBeDisabled()
+  })
+
+  it('offers the sync mode choice while setup is unfinished', async () => {
+    render(<SetupPage status={base} onChanged={vi.fn()} />)
+    expect(await screen.findByLabelText('Sync everything')).toBeChecked()
+    expect(screen.getByLabelText('Skip shared books')).toBeInTheDocument()
+    expect(screen.getByLabelText('Confirm shared books')).toBeInTheDocument()
+    expect(screen.getByLabelText('Confirm every book')).toBeInTheDocument()
   })
 })
