@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { RemovePreview } from '../types'
 import { Button, Notice } from './ui'
 import { errorMessage } from './uiStyles'
@@ -15,6 +15,14 @@ interface RemoveDialogProps {
 export default function RemoveDialog({ title, preview, onConfirm, onCancel }: RemoveDialogProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onCancel])
 
   const confirm = async () => {
     setBusy(true)

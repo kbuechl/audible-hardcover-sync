@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { RemovePreview, ReviewDecision, ReviewFilter, ReviewItem, Status } from '../types'
+import type { RemovePreview, ReviewDecision, ReviewFilter, ReviewItem } from '../types'
 import { fetchReview, previewRemove, removeFromHardcover, setReviewDecision } from '../api'
 import { Button, Card, Notice } from '../components/ui'
 import { inputClass, errorMessage } from '../components/uiStyles'
@@ -9,7 +9,6 @@ import RemoveDialog from '../components/RemoveDialog'
 import Toast from '../components/Toast'
 
 interface ReviewPageProps {
-  status?: Status | null
   onChanged?: () => void
 }
 
@@ -36,6 +35,7 @@ export default function ReviewPage({ onChanged = () => {} }: ReviewPageProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [removing, setRemoving] = useState<{ item: ReviewItem; preview: RemovePreview } | null>(null)
   const hideToast = useCallback(() => setToast(null), [])
@@ -45,24 +45,31 @@ export default function ReviewPage({ onChanged = () => {} }: ReviewPageProps) {
     return () => window.clearTimeout(timer)
   }, [query])
 
-  const load = useCallback(async () => {
-    try {
-      const list = await fetchReview(filter, q)
-      setItems(list)
-      // Keep only selections that are still listed.
-      setSelected((prev) => new Set(list.filter((i) => prev.has(i.asin)).map((i) => i.asin)))
-      setError(null)
-    } catch (err) {
-      setError(`Couldn't load the list — ${errorMessage(err)}.`)
-    } finally {
-      setLoading(false)
-    }
-  }, [filter, q])
+  // Bumped after an action to refetch the current list.
+  const [reloadKey, setReloadKey] = useState(0)
+  const reload = () => setReloadKey((k) => k + 1)
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load()
-  }, [load])
+    // Ignore a response that arrives after the filter or search moved on.
+    let cancelled = false
+    fetchReview(filter, q)
+      .then((list) => {
+        if (cancelled) return
+        setItems(list)
+        // Keep only selections that are still listed.
+        setSelected((prev) => new Set(list.filter((i) => prev.has(i.asin)).map((i) => i.asin)))
+        setLoadError(null)
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(`Couldn't load the list — ${errorMessage(err)}.`)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [filter, q, reloadKey])
 
   const changeFilter = (next: ReviewFilter) => {
     if (next === filter) return
@@ -91,7 +98,7 @@ export default function ReviewPage({ onChanged = () => {} }: ReviewPageProps) {
       const n = asins.length
       const books = n === 1 ? '1 book' : `${n} books`
       setToast(decision === 'sync' ? `${books} will sync on the next run.` : `${books} marked Not wanted.`)
-      await load()
+      reload()
       onChanged()
     } catch (err) {
       setError(`Couldn't save that — ${errorMessage(err)}. Try again.`)
@@ -114,7 +121,7 @@ export default function ReviewPage({ onChanged = () => {} }: ReviewPageProps) {
     await removeFromHardcover(removing.item.asin)
     setToast(`Removed “${removing.item.title}” from Hardcover.`)
     setRemoving(null)
-    await load()
+    reload()
     onChanged()
   }
 
@@ -152,11 +159,11 @@ export default function ReviewPage({ onChanged = () => {} }: ReviewPageProps) {
         className={inputClass}
       />
 
-      {error !== null && <Notice kind="error">{error}</Notice>}
+      {(error ?? loadError) !== null && <Notice kind="error">{error ?? loadError}</Notice>}
 
       {loading ? (
         <p className="text-muted text-sm">Loading…</p>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && loadError !== null ? null : items.length === 0 ? (
         <div className="bg-panel border border-line rounded-xl px-6 py-10 text-center shadow-sm flex flex-col items-center gap-3">
           {filter === 'waiting' && q === '' && (
             <span className="grid place-items-center size-14 rounded-full bg-pine-soft text-pine-text">

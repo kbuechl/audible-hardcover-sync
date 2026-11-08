@@ -93,7 +93,7 @@ export default function App() {
 
       <main key={active} className="fade-in">
         {active === 'matches' && <MatchesPage status={status} onSyncStarted={refresh} />}
-        {active === 'review' && <ReviewPage status={status} onChanged={refresh} />}
+        {active === 'review' && <ReviewPage onChanged={refresh} />}
         {active === 'setup' && <SetupPage status={status} onChanged={refresh} />}
         {active === 'notifications' && <NotificationsPage />}
       </main>
