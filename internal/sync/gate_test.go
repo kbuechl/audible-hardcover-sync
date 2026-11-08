@@ -287,3 +287,63 @@ func onlyAction(t *testing.T, store *state.Store, asin string) state.SyncAction 
 	}
 	return acts[0]
 }
+
+// Promoting to Read makes Hardcover add a read a moment after the status
+// change returns. The sync must still log that read as its own.
+func TestRun_PromoteRecordsLateRead(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"PRO": 888}
+	fh.userBooks[888] = hardcover.UserBook{ID: 60, StatusID: hardcover.StatusWantToRead}
+	fh.existingReads = map[int64][]int64{60: {600}}
+	fh.insertRead, fh.readLag = true, 2
+	store := newTestStore(t)
+	items := []audible.LibraryItem{{ASIN: "PRO", IsFinished: true, PercentComplete: 100, FinishedAt: ptrTime("2026-10-01T00:00:00Z")}}
+	runMode(t, "all", items, fh, store, &fakeNotifier{})
+
+	pro := onlyAction(t, store, "PRO")
+	if !slices.Equal(pro.PriorReadIDs, []int64{600}) || len(pro.CreatedReadIDs) != 1 || pro.CreatedReadIDs[0] == 600 {
+		t.Errorf("promote action = %+v, want prior [600] and the late read created", pro)
+	}
+}
+
+// After Remove forgets a book's sync state, setting it back to Sync must
+// add it to Hardcover again.
+func TestRunReinsertsAfterRemoveAndResync(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"A1": 777}
+	store := newTestStore(t)
+	if err := store.SeeReviewBook(state.ReviewBook{ASIN: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetDecision([]string{"A1"}, state.DecisionSync); err != nil {
+		t.Fatal(err)
+	}
+	items := []audible.LibraryItem{{ASIN: "A1", IsFinished: true, PercentComplete: 100}}
+	res := runMode(t, "confirm_all", items, fh, store, &fakeNotifier{})
+	if res.Synced != 1 || len(fh.inserted) != 1 {
+		t.Errorf("Result = %+v inserted %v, want one insert", res, fh.inserted)
+	}
+}
+
+func TestRun_ConfirmSharedMixed(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"SH": 777, "OWN": 778}
+	store := newTestStore(t)
+	items := []audible.LibraryItem{
+		{ASIN: "SH", Shared: true, IsFinished: true, PercentComplete: 100},
+		{ASIN: "OWN", IsFinished: true, PercentComplete: 100},
+	}
+	res := runMode(t, "confirm_shared", items, fh, store, &fakeNotifier{})
+	if res.Waiting != 1 || res.Synced != 1 {
+		t.Errorf("Result = %+v, want Waiting 1 Synced 1", res)
+	}
+	if _, ok := fh.inserted[777]; ok {
+		t.Errorf("shared book written to Hardcover")
+	}
+	if _, ok := fh.inserted[778]; !ok {
+		t.Errorf("owned book not inserted")
+	}
+	if acts, _ := store.Actions("SH"); len(acts) != 0 {
+		t.Errorf("shared actions = %+v, want none", acts)
+	}
+}

@@ -203,9 +203,7 @@ func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, st
 	// unknown, so none are claimed.
 	var created []int64
 	if priorOK {
-		if after, ok := readIDs(ctx, d, item, existing.ID); ok {
-			created = createdSince(priorReads, after)
-		}
+		created, _ = newReadIDs(ctx, d, item, existing.ID, priorReads)
 	}
 	recordAction(d, state.SyncAction{
 		ASIN: item.ASIN, Kind: state.ActionPromoted, UserBookID: existing.ID,

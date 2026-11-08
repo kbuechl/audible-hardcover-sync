@@ -58,7 +58,8 @@ type fakeHardcover struct {
 	// misses it for the first readLag calls.
 	insertRead bool
 	readLag    int
-	lagCalls   map[int64]int // user_book id → ReadIDs calls so far
+	lagCalls   map[int64]int   // user_book id → ReadIDs calls so far
+	lagRead    map[int64]int64 // user_book id → the read ReadIDs hides while lagging
 }
 
 type fakeRead struct {
@@ -142,9 +143,7 @@ func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, status
 	if f.insertRead && statusID == hardcover.StatusRead {
 		f.nextReadID++
 		f.existingReads[f.nextUserBookID] = []int64{f.nextReadID}
-		if f.lagCalls == nil {
-			f.lagCalls = map[int64]int{}
-		}
+		f.lagFrom(f.nextUserBookID, f.nextReadID)
 	}
 	return f.nextUserBookID, nil
 }
@@ -167,7 +166,7 @@ func (f *fakeHardcover) ReadIDs(ctx context.Context, userBookID int64) ([]int64,
 		n := f.lagCalls[userBookID]
 		f.lagCalls[userBookID] = n + 1
 		if n < f.readLag {
-			return nil, nil
+			return slices.DeleteFunc(slices.Clone(f.existingReads[userBookID]), func(id int64) bool { return id == f.lagRead[userBookID] }), nil
 		}
 	}
 	ids := slices.Clone(f.existingReads[userBookID])
@@ -210,7 +209,20 @@ func (f *fakeHardcover) UpdateUserBookStatus(ctx context.Context, userBookID int
 		return f.upsertErr
 	}
 	f.statusUpdates[userBookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate}
+	if f.insertRead && statusID == hardcover.StatusRead {
+		f.nextReadID++
+		f.existingReads[userBookID] = append(f.existingReads[userBookID], f.nextReadID)
+		f.lagFrom(userBookID, f.nextReadID)
+	}
 	return nil
+}
+
+// lagFrom hides readID from the next readLag ReadIDs calls on userBookID.
+func (f *fakeHardcover) lagFrom(userBookID, readID int64) {
+	if f.lagCalls == nil {
+		f.lagCalls, f.lagRead = map[int64]int{}, map[int64]int64{}
+	}
+	f.lagCalls[userBookID], f.lagRead[userBookID] = 0, readID
 }
 
 func (f *fakeHardcover) ClearFinishDate(ctx context.Context, userBookID int64) error {
