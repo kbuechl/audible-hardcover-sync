@@ -2,13 +2,16 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
 	"github.com/kbuechl/audible-hardcover-sync/internal/hardcover"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
+	_ "modernc.org/sqlite"
 )
 
 func TestAllowed(t *testing.T) {
@@ -360,5 +363,67 @@ func TestRun_PromoteClaimsNothingWithoutPriorReads(t *testing.T) {
 	pro := onlyAction(t, store, "PRO")
 	if pro.Kind != state.ActionPromoted || len(pro.CreatedReadIDs) != 0 {
 		t.Errorf("promote action = %+v, want nothing created", pro)
+	}
+}
+
+// fakeReviewStore is a reviewStore whose calls fail on demand.
+type fakeReviewStore struct {
+	seeErr, readErr error
+	row             *state.ReviewBook
+}
+
+func (f *fakeReviewStore) SeeReviewBook(state.ReviewBook) error { return f.seeErr }
+func (f *fakeReviewStore) ReviewBook(string) (*state.ReviewBook, error) {
+	return f.row, f.readErr
+}
+
+func TestSeeReviewBook_Errors(t *testing.T) {
+	boom := errors.New("boom")
+	tests := []struct {
+		name   string
+		store  *fakeReviewStore
+		wantOK bool
+	}{
+		{"ok", &fakeReviewStore{row: &state.ReviewBook{ASIN: "A1"}}, true},
+		{"unknown row is undecided, not an error", &fakeReviewStore{}, true},
+		{"record error", &fakeReviewStore{seeErr: boom}, false},
+		{"read error", &fakeReviewStore{readErr: boom}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := seeReviewBook(tt.store, audible.LibraryItem{ASIN: "A1"}, state.StatusInProgress)
+			if ok != tt.wantOK {
+				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestRun_ReviewStoreErrorSkipsBook(t *testing.T) {
+	fh := newFakeHardcover()
+	fh.byASIN = map[string]int64{"A1": 777}
+	path := filepath.Join(t.TempDir(), "state.db")
+	store, err := state.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	// A second connection breaks the review table under the open store.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`DROP TABLE review_books`); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []audible.LibraryItem{{ASIN: "A1", PercentComplete: 40, RuntimeSeconds: 3600}}
+	res := runMode(t, "all", items, fh, store, &fakeNotifier{})
+	if res.Errored != 1 || res.Synced != 0 {
+		t.Errorf("Result = %+v, want Errored 1", res)
+	}
+	if len(fh.inserted) != 0 || len(fh.progress) != 0 {
+		t.Errorf("wrote to Hardcover: inserted %v progress %v", fh.inserted, fh.progress)
 	}
 }

@@ -124,7 +124,11 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 
 		// Every book the sync would act on is listed for review, and held
 		// or skipped books get no Hardcover writes at all.
-		rb := seeReviewBook(d, item, status)
+		rb, ok := seeReviewBook(d.Store, item, status)
+		if !ok {
+			result.Errored++ // decision unknown: no Hardcover writes
+			continue
+		}
 		if !allowed(d.SyncMode, item, rb) {
 			if Held(d.SyncMode, item.Shared, decisionOf(rb)) {
 				result.Waiting++

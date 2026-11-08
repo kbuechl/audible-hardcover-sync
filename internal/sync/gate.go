@@ -51,23 +51,32 @@ func decisionOf(rb *state.ReviewBook) state.Decision {
 	return rb.Decision
 }
 
-// seeReviewBook records item in the review list and returns its row. A
-// failure is logged; the returned nil row then counts as undecided.
-func seeReviewBook(d Deps, item audible.LibraryItem, status state.Status) *state.ReviewBook {
-	err := d.Store.SeeReviewBook(state.ReviewBook{
+// reviewStore is the part of the state store seeReviewBook needs.
+type reviewStore interface {
+	SeeReviewBook(state.ReviewBook) error
+	ReviewBook(asin string) (*state.ReviewBook, error)
+}
+
+// seeReviewBook records item in the review list and returns its row (nil
+// when the book is new to the list). ok is false, with the error logged,
+// when the row could not be written or read: the decision is then unknown,
+// so the caller must skip the book rather than treat it as undecided (it
+// may be Not wanted).
+func seeReviewBook(store reviewStore, item audible.LibraryItem, status state.Status) (rb *state.ReviewBook, ok bool) {
+	err := store.SeeReviewBook(state.ReviewBook{
 		ASIN: item.ASIN, Title: item.Title, Author: item.Author, CoverURL: item.CoverURL,
 		Shared: item.Shared, Status: status, PercentComplete: item.PercentComplete,
 	})
 	if err != nil {
 		slog.Error("record review book", "asin", item.ASIN, "error", err)
-		return nil
+		return nil, false
 	}
-	rb, err := d.Store.ReviewBook(item.ASIN)
+	rb, err = store.ReviewBook(item.ASIN)
 	if err != nil {
 		slog.Error("read review book", "asin", item.ASIN, "error", err)
-		return nil
+		return nil, false
 	}
-	return rb
+	return rb, true
 }
 
 // markSynced gives an undecided book the Sync decision once it is on
