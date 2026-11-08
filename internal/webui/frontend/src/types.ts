@@ -29,6 +29,7 @@ export interface Status {
   audible: { connected: boolean; error?: string }
   hardcover: { connected: boolean; username?: string; fromEnv: boolean; error?: string }
   sync: { running: boolean; last?: SyncReport }
+  waiting?: number
   version?: string
 }
 
@@ -43,4 +44,24 @@ export interface Preferences {
   publicUrl: string
   syncMode: 'all' | 'skip_shared' | 'confirm_shared' | 'confirm_all'
   reviewNotify: 'after_sync' | 'daily' | 'weekly' | 'off'
+}
+
+export type ReviewFilter = 'waiting' | 'synced' | 'not_wanted'
+export type ReviewDecision = 'sync' | 'not_wanted' | ''
+
+export interface ReviewItem {
+  asin: string
+  title: string
+  author: string
+  coverUrl?: string
+  shared: boolean
+  status: string
+  percentComplete: number
+  decision: ReviewDecision
+  canRemove: boolean
+}
+
+export interface RemovePreview {
+  deletes: string[]
+  alsoDeletes: string[]
 }
