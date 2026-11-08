@@ -552,11 +552,15 @@ func (c *Client) FetchUserBooks(ctx context.Context) (map[int64]UserBook, error)
 // It maps to Hardcover's user_date field (the "end date" shown in the
 // reading log). Only set for finished books.
 //
+// It also returns the entry's read ids from the mutation's response,
+// which holds the read Hardcover adds for a Read or Currently Reading
+// book; a listing right after the insert can still miss it.
+//
 // The mutation shape (argument types) was confirmed via live GraphQL
 // introspection against Hardcover's real API on 2026-08-01.
-func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error) {
+func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, []int64, error) {
 	insertQuery := `mutation InsertUserBook($object: UserBookCreateInput!) {
-		insert_user_book(object: $object) { id }
+		insert_user_book(object: $object) { id user_book { user_book_reads { id } } }
 	}`
 	object := map[string]any{"book_id": bookID, "status_id": statusID}
 	if rating != nil {
@@ -570,11 +574,12 @@ func (c *Client) InsertUserBook(ctx context.Context, bookID int64, statusID int,
 	}
 	var out struct {
 		InsertUserBook struct {
-			ID int64 `json:"id"`
+			ID       int64          `json:"id"`
+			UserBook *userBookReads `json:"user_book"`
 		} `json:"insert_user_book"`
 	}
 	if err := c.do(ctx, insertQuery, map[string]any{"object": object}, &out); err != nil {
-		return 0, fmt.Errorf("insert user_book: %w", err)
+		return 0, nil, fmt.Errorf("insert user_book: %w", err)
 	}
-	return out.InsertUserBook.ID, nil
+	return out.InsertUserBook.ID, out.InsertUserBook.UserBook.ids(), nil
 }

@@ -135,7 +135,7 @@ type hardcoverRemover interface {
 	UserBookDetails(ctx context.Context, userBookID int64) (*hardcover.UserBookDetails, error)
 	DeleteUserBook(ctx context.Context, userBookID int64) error
 	DeleteRead(ctx context.Context, readID int64) error
-	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error
+	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error)
 }
 
 func (a *App) remover() (hardcoverRemover, error) {
@@ -298,7 +298,8 @@ func undo(ctx context.Context, hc hardcoverRemover, act state.SyncAction) error 
 		if err != nil || d == nil {
 			return err // nil, nil: the entry is gone, nothing to move back
 		}
-		return hc.UpdateUserBookStatus(ctx, act.UserBookID, act.PrevStatusID, nil, nil)
+		_, err = hc.UpdateUserBookStatus(ctx, act.UserBookID, act.PrevStatusID, nil, nil)
+		return err
 	}
 	return fmt.Errorf("unknown action kind %q", act.Kind)
 }

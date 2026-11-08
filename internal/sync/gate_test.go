@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"os"
 	"slices"
 	"testing"
 
@@ -216,6 +215,7 @@ func TestRun_RecordsActions(t *testing.T) {
 	fh.userBooks[889] = hardcover.UserBook{ID: 61, StatusID: hardcover.StatusWantToRead}
 	fh.userBooks[999] = hardcover.UserBook{ID: 70, StatusID: hardcover.StatusRead, LastReadDate: ptrTime("2025-01-01T00:00:00Z")}
 	fh.existingReads = map[int64][]int64{60: {600}}
+	fh.insertRead = true
 	store := newTestStore(t)
 	items := []audible.LibraryItem{
 		{ASIN: "INS", PercentComplete: 30, RuntimeSeconds: 3600, Rating: intPtr(4)},
@@ -239,7 +239,7 @@ func TestRun_RecordsActions(t *testing.T) {
 		t.Errorf("promote action = %+v, want one created read", pro2)
 	}
 	rel := onlyAction(t, store, "REL")
-	if rel.Kind != state.ActionReadStarted || rel.UserBookID != 70 || rel.ReadID != 9001 {
+	if rel.Kind != state.ActionReadStarted || rel.UserBookID != 70 || fh.reads[rel.ReadID] == nil || fh.reads[rel.ReadID].userBookID != 70 {
 		t.Errorf("relisten action = %+v", rel)
 	}
 }
@@ -257,18 +257,13 @@ func TestRun_AdoptedReadNotRecorded(t *testing.T) {
 	}
 }
 
-// TestMain keeps the wait for Hardcover's late reads out of the tests.
-func TestMain(m *testing.M) {
-	insertedReadDelay = 0
-	os.Exit(m.Run())
-}
-
-// Hardcover adds the read for a book inserted as Read a moment after the
-// insert returns. The sync must still log that read as its own.
+// Hardcover returns the read it adds for a book inserted as Read in the
+// insert's response; a listing right after misses it. The sync must
+// still log that read as its own.
 func TestRun_InsertRecordsLateRead(t *testing.T) {
 	fh := newFakeHardcover()
 	fh.byASIN = map[string]int64{"FIN": 777}
-	fh.insertRead, fh.readLag = true, 2
+	fh.insertRead = true
 	store := newTestStore(t)
 	items := []audible.LibraryItem{{ASIN: "FIN", IsFinished: true, PercentComplete: 100, FinishedAt: ptrTime("2026-10-01T00:00:00Z")}}
 	runMode(t, "all", items, fh, store, &fakeNotifier{})
@@ -288,14 +283,15 @@ func onlyAction(t *testing.T, store *state.Store, asin string) state.SyncAction 
 	return acts[0]
 }
 
-// Promoting to Read makes Hardcover add a read a moment after the status
-// change returns. The sync must still log that read as its own.
+// Promoting to Read makes Hardcover add a read that the status change's
+// response holds but a listing right after misses. The sync must still
+// log that read as its own, and never the user's earlier one.
 func TestRun_PromoteRecordsLateRead(t *testing.T) {
 	fh := newFakeHardcover()
 	fh.byASIN = map[string]int64{"PRO": 888}
 	fh.userBooks[888] = hardcover.UserBook{ID: 60, StatusID: hardcover.StatusWantToRead}
 	fh.existingReads = map[int64][]int64{60: {600}}
-	fh.insertRead, fh.readLag = true, 2
+	fh.insertRead = true
 	store := newTestStore(t)
 	items := []audible.LibraryItem{{ASIN: "PRO", IsFinished: true, PercentComplete: 100, FinishedAt: ptrTime("2026-10-01T00:00:00Z")}}
 	runMode(t, "all", items, fh, store, &fakeNotifier{})

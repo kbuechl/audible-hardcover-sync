@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"slices"
-	"time"
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/audible"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
@@ -99,43 +98,6 @@ func readIDs(ctx context.Context, d Deps, item audible.LibraryItem, userBookID i
 		return nil, false
 	}
 	return ids, true
-}
-
-// insertedReadPolls and insertedReadDelay bound the wait for the read
-// Hardcover adds to a book inserted or promoted as Read. It adds
-// it a moment after the mutation returns (seen at ~0.2s empty, ~0.6s
-// present), so an immediate listing can miss it and Remove would later
-// call it a read the user added. A var so tests need not sleep.
-const insertedReadPolls = 5
-
-var insertedReadDelay = 400 * time.Millisecond
-
-// insertedReadIDs lists the reads on a just-inserted user_book, waiting
-// briefly while there are none yet.
-func insertedReadIDs(ctx context.Context, d Deps, item audible.LibraryItem, userBookID int64) []int64 {
-	ids, _ := newReadIDs(ctx, d, item, userBookID, nil)
-	return ids
-}
-
-// newReadIDs returns the reads on userBookID that are not in prior,
-// waiting briefly while there are none yet. ok is false when Hardcover
-// could not be asked; then nothing is claimed, so Remove under-deletes.
-func newReadIDs(ctx context.Context, d Deps, item audible.LibraryItem, userBookID int64, prior []int64) ([]int64, bool) {
-	for i := 0; ; i++ {
-		ids, ok := readIDs(ctx, d, item, userBookID)
-		if !ok {
-			return nil, false
-		}
-		created := createdSince(prior, ids)
-		if len(created) > 0 || i == insertedReadPolls-1 {
-			return created, true
-		}
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-time.After(insertedReadDelay):
-		}
-	}
 }
 
 // createdSince returns the ids in after that are not in before.

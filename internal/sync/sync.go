@@ -27,13 +27,13 @@ type HardcoverClient interface {
 	FindDefaultEdition(ctx context.Context, bookID int64) (*int64, error)
 	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
 	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
-	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error)
+	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, []int64, error)
 	SetReadProgress(ctx context.Context, userBookID int64, percent float64, fallbackSeconds int) error
 	StartRead(ctx context.Context, userBookID int64, startedAt time.Time, progressSeconds int) (int64, error)
 	UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error
 	FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error
 	ClearFinishDate(ctx context.Context, userBookID int64) error
-	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error
+	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error)
 	ReadIDs(ctx context.Context, userBookID int64) ([]int64, error)
 }
 
@@ -203,7 +203,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		}
 
 		// New book — insert it with status, edition, date, and rating.
-		userBookID, err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID)
+		userBookID, created, err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID)
 		if err != nil {
 			slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
 			result.Errored++
@@ -237,8 +237,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			}
 		}
 
-		// Every read on a just-inserted book was made by this sync.
-		created := insertedReadIDs(ctx, d, item, userBookID)
+		// Every read the insert returned was made by this sync.
 		recordAction(d, state.SyncAction{
 			ASIN: item.ASIN, Kind: state.ActionInserted, UserBookID: userBookID,
 			Rating: item.Rating, CreatedReadIDs: created,

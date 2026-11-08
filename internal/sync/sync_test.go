@@ -53,13 +53,11 @@ type fakeHardcover struct {
 	existingReads      map[int64][]int64    // user_book id → reads already on Hardcover
 	progressReads      map[int64]int64      // user_book id → read created by SetReadProgress
 	nextProgressReadID int64
-	// insertRead, when set, makes InsertUserBook with status Read add a
-	// read the way Hardcover does: after the call returns, so ReadIDs
-	// misses it for the first readLag calls.
+	// insertRead, when set, makes InsertUserBook and UpdateUserBookStatus
+	// add a read (see addsRead) the way Hardcover does: the mutation
+	// returns it, but ReadIDs right after does not list it yet.
 	insertRead bool
-	readLag    int
-	lagCalls   map[int64]int   // user_book id → ReadIDs calls so far
-	lagRead    map[int64]int64 // user_book id → the read ReadIDs hides while lagging
+	lateReads  map[int64]bool // read ids ReadIDs does not list yet
 }
 
 type fakeRead struct {
@@ -134,18 +132,18 @@ func (f *fakeHardcover) FindDefaultEdition(ctx context.Context, bookID int64) (*
 	return nil, nil // tests don't need edition resolution
 }
 
-func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error) {
+func (f *fakeHardcover) InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, []int64, error) {
 	if f.upsertErr != nil {
-		return 0, f.upsertErr
+		return 0, nil, f.upsertErr
 	}
 	f.inserted[bookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate, editionID: editionID}
 	f.nextUserBookID++
-	if f.insertRead && statusID == hardcover.StatusRead {
+	if f.addsRead(f.nextUserBookID, statusID) {
 		f.nextReadID++
 		f.existingReads[f.nextUserBookID] = []int64{f.nextReadID}
-		f.lagFrom(f.nextUserBookID, f.nextReadID)
+		f.markLate(f.nextReadID)
 	}
-	return f.nextUserBookID, nil
+	return f.nextUserBookID, slices.Clone(f.existingReads[f.nextUserBookID]), nil
 }
 
 func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, percent float64, fallbackSeconds int) error {
@@ -162,14 +160,7 @@ func (f *fakeHardcover) SetReadProgress(ctx context.Context, userBookID int64, p
 }
 
 func (f *fakeHardcover) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error) {
-	if f.lagCalls != nil {
-		n := f.lagCalls[userBookID]
-		f.lagCalls[userBookID] = n + 1
-		if n < f.readLag {
-			return slices.DeleteFunc(slices.Clone(f.existingReads[userBookID]), func(id int64) bool { return id == f.lagRead[userBookID] }), nil
-		}
-	}
-	ids := slices.Clone(f.existingReads[userBookID])
+	ids := slices.DeleteFunc(slices.Clone(f.existingReads[userBookID]), func(id int64) bool { return f.lateReads[id] })
 	if id, ok := f.progressReads[userBookID]; ok {
 		ids = append(ids, id)
 	}
@@ -204,25 +195,33 @@ func (f *fakeHardcover) FinishRead(ctx context.Context, readID int64, finishedAt
 	return nil
 }
 
-func (f *fakeHardcover) UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error {
+func (f *fakeHardcover) UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error) {
 	if f.upsertErr != nil {
-		return f.upsertErr
+		return nil, f.upsertErr
 	}
 	f.statusUpdates[userBookID] = upsertCall{statusID: statusID, rating: rating, userDate: userDate}
-	if f.insertRead && statusID == hardcover.StatusRead {
+	if f.addsRead(userBookID, statusID) {
 		f.nextReadID++
 		f.existingReads[userBookID] = append(f.existingReads[userBookID], f.nextReadID)
-		f.lagFrom(userBookID, f.nextReadID)
+		f.markLate(f.nextReadID)
 	}
-	return nil
+	return slices.Clone(f.existingReads[userBookID]), nil
 }
 
-// lagFrom hides readID from the next readLag ReadIDs calls on userBookID.
-func (f *fakeHardcover) lagFrom(userBookID, readID int64) {
-	if f.lagCalls == nil {
-		f.lagCalls, f.lagRead = map[int64]int{}, map[int64]int64{}
+// addsRead reports whether moving userBookID to statusID adds a read, as
+// Hardcover does for Read, and for Currently Reading on an entry without one.
+func (f *fakeHardcover) addsRead(userBookID int64, statusID int) bool {
+	return f.insertRead && (statusID == hardcover.StatusRead ||
+		statusID == hardcover.StatusCurrentlyReading && len(f.existingReads[userBookID]) == 0)
+}
+
+// markLate keeps readID out of ReadIDs, as Hardcover does just after
+// the mutation that added it.
+func (f *fakeHardcover) markLate(readID int64) {
+	if f.lateReads == nil {
+		f.lateReads = map[int64]bool{}
 	}
-	f.lagCalls[userBookID], f.lagRead[userBookID] = 0, readID
+	f.lateReads[readID] = true
 }
 
 func (f *fakeHardcover) ClearFinishDate(ctx context.Context, userBookID int64) error {

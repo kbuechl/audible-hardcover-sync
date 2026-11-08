@@ -76,10 +76,32 @@ func (c *Client) updateRead(ctx context.Context, readID int64, object map[string
 	return out.Result.err("update user_book_read")
 }
 
+// userBookReads is the user_book a mutation returns, with its read ids.
+type userBookReads struct {
+	Reads []struct {
+		ID int64 `json:"id"`
+	} `json:"user_book_reads"`
+}
+
+// ids lists the read ids; nil when the mutation returned no user_book.
+func (u *userBookReads) ids() []int64 {
+	if u == nil {
+		return nil
+	}
+	ids := make([]int64, len(u.Reads))
+	for i, r := range u.Reads {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
 // UpdateUserBookStatus changes an existing library entry's status, and
 // optionally its rating and finish date (user_date). Like the read
 // mutations, update_user_book reports failures in its own "error" field.
-func (c *Client) UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error {
+// It returns the entry's read ids from the response, which (checked live
+// on 2026-11-08) already holds the read Hardcover adds when a book moves
+// to Read or Currently Reading.
+func (c *Client) UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error) {
 	object := map[string]any{"status_id": statusID}
 	if rating != nil {
 		object["rating"] = *rating
@@ -88,15 +110,21 @@ func (c *Client) UpdateUserBookStatus(ctx context.Context, userBookID int64, sta
 		object["user_date"] = userDate.Format(dateLayout)
 	}
 	var out struct {
-		Result mutationResult `json:"update_user_book"`
+		Result struct {
+			mutationResult
+			UserBook *userBookReads `json:"user_book"`
+		} `json:"update_user_book"`
 	}
 	m := `mutation UpdateUserBookStatus($id: Int!, $object: UserBookUpdateInput!) {
-		update_user_book(id: $id, object: $object) { id error }
+		update_user_book(id: $id, object: $object) { id error user_book { user_book_reads { id } } }
 	}`
 	if err := c.do(ctx, m, map[string]any{"id": userBookID, "object": object}, &out); err != nil {
-		return fmt.Errorf("update user_book: %w", err)
+		return nil, fmt.Errorf("update user_book: %w", err)
 	}
-	return out.Result.err("update user_book")
+	if err := out.Result.err("update user_book"); err != nil {
+		return nil, err
+	}
+	return out.Result.UserBook.ids(), nil
 }
 
 // ClearFinishDate removes the finish date from a user_book's newest read.

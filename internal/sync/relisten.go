@@ -178,7 +178,8 @@ func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, st
 		statusID, rating, userDate = hardcover.StatusRead, item.Rating, item.FinishedAt
 	}
 	priorReads, priorOK := readIDs(ctx, d, item, existing.ID)
-	if err := d.Hardcover.UpdateUserBookStatus(ctx, existing.ID, statusID, rating, userDate); err != nil {
+	after, err := d.Hardcover.UpdateUserBookStatus(ctx, existing.ID, statusID, rating, userDate)
+	if err != nil {
 		slog.Error("move hardcover book off want to read", "asin", item.ASIN, "book_id", bookID, "error", err)
 		return false
 	}
@@ -203,7 +204,7 @@ func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, st
 	// unknown, so none are claimed.
 	var created []int64
 	if priorOK {
-		created, _ = newReadIDs(ctx, d, item, existing.ID, priorReads)
+		created = createdSince(priorReads, after)
 	}
 	recordAction(d, state.SyncAction{
 		ASIN: item.ASIN, Kind: state.ActionPromoted, UserBookID: existing.ID,

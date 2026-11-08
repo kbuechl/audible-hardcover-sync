@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,7 +119,7 @@ func TestClient_UpdateUserBookStatus(t *testing.T) {
 		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": "not yours"}}, nil
 	})
 	finished := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	err := c.UpdateUserBookStatus(context.Background(), 200, StatusRead, &rating, &finished)
+	_, err := c.UpdateUserBookStatus(context.Background(), 200, StatusRead, &rating, &finished)
 	if err == nil || !strings.Contains(err.Error(), "not yours") {
 		t.Errorf("UpdateUserBookStatus() error = %v, want mutation error surfaced", err)
 	}
@@ -130,10 +131,16 @@ func TestClient_UpdateUserBookStatus_StatusOnly(t *testing.T) {
 		if obj["status_id"] != float64(StatusCurrentlyReading) || len(obj) != 1 {
 			t.Errorf("update object = %v, want only status_id", obj)
 		}
-		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": nil}}, nil
+		if !strings.Contains(query, "user_book_reads { id }") {
+			t.Errorf("update query = %q, want the entry's reads selected", query)
+		}
+		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": nil, "user_book": map[string]any{
+			"user_book_reads": []any{map[string]any{"id": 7}, map[string]any{"id": 8}},
+		}}}, nil
 	})
-	if err := c.UpdateUserBookStatus(context.Background(), 200, StatusCurrentlyReading, nil, nil); err != nil {
-		t.Errorf("UpdateUserBookStatus() error = %v", err)
+	reads, err := c.UpdateUserBookStatus(context.Background(), 200, StatusCurrentlyReading, nil, nil)
+	if err != nil || !slices.Equal(reads, []int64{7, 8}) {
+		t.Errorf("UpdateUserBookStatus() = %v, %v; want [7 8]", reads, err)
 	}
 }
 

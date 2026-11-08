@@ -185,8 +185,8 @@ func (f *fakeRemover) DeleteUserBook(_ context.Context, id int64) error {
 func (f *fakeRemover) DeleteRead(_ context.Context, id int64) error {
 	return f.step("delete read " + itoa(id))
 }
-func (f *fakeRemover) UpdateUserBookStatus(_ context.Context, id int64, statusID int, _ *int, _ *time.Time) error {
-	return f.step("status " + itoa(id) + " " + itoa(int64(statusID)))
+func (f *fakeRemover) UpdateUserBookStatus(_ context.Context, id int64, statusID int, _ *int, _ *time.Time) ([]int64, error) {
+	return nil, f.step("status " + itoa(id) + " " + itoa(int64(statusID)))
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
