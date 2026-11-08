@@ -188,7 +188,6 @@ func (a *App) PreviewRemove(ctx context.Context, asin string) (RemovePreview, er
 		case state.ActionPromoted:
 			p.Deletes = append(p.Deletes, "the reads the sync added, and moves the book back to Want to Read")
 		case state.ActionInserted:
-			p.Deletes = append(p.Deletes, "the book from your Hardcover library")
 			insert = &acts[i]
 		}
 	}
@@ -198,8 +197,10 @@ func (a *App) PreviewRemove(ctx context.Context, asin string) (RemovePreview, er
 	}
 	d, err := hc.UserBookDetails(ctx, insert.UserBookID)
 	if err != nil || d == nil {
-		return p, err
+		return p, err // nil, nil: the entry is already gone
 	}
+	// The insert is the oldest action, so it is listed last.
+	p.Deletes = append(p.Deletes, "the book from your Hardcover library")
 	p.AlsoDeletes = userData(acts, d)
 	return p, nil
 }

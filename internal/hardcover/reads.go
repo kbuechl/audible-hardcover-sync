@@ -2,6 +2,7 @@ package hardcover
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -173,26 +174,24 @@ func (c *Client) UserBookDetails(ctx context.Context, userBookID int64) (*UserBo
 	return d, nil
 }
 
-// DeleteUserBook removes a library entry and, with it, its reads. An entry
-// that is already gone (null result) counts as deleted.
+// DeleteUserBook removes a library entry and, with it, its reads. Deleting
+// an entry that is already gone succeeds.
 func (c *Client) DeleteUserBook(ctx context.Context, userBookID int64) error {
 	return c.deleteByID(ctx, "delete_user_book", userBookID)
 }
 
-// DeleteRead removes one read. A read that is already gone (null result)
-// counts as deleted.
+// DeleteRead removes one read. Deleting a read that is already gone
+// succeeds.
 func (c *Client) DeleteRead(ctx context.Context, readID int64) error {
 	return c.deleteByID(ctx, "delete_user_book_read", readID)
 }
 
-// deleteByID runs a delete mutation. Unlike the insert and update
-// mutations, the delete results have no "error" field (Task 0 spike): a
-// failure surfaces as a GraphQL error, and a null result means the row was
-// already gone.
+// deleteByID runs a delete mutation. The delete results have no "error"
+// field: a failure surfaces as a GraphQL error, and a missing id still
+// returns success. The returned id is ignored because its type varies
+// (delete_user_book sends a string, delete_user_book_read a number).
 func (c *Client) deleteByID(ctx context.Context, mutation string, id int64) error {
-	var out map[string]*struct {
-		ID int64 `json:"id"`
-	}
+	var out map[string]json.RawMessage
 	m := fmt.Sprintf(`mutation Delete($id: Int!) { %s(id: $id) { id } }`, mutation)
 	if err := c.do(ctx, m, map[string]any{"id": id}, &out); err != nil {
 		return fmt.Errorf("%s: %w", mutation, err)

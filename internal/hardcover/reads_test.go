@@ -160,9 +160,9 @@ func TestClient_DeleteUserBookAndRead(t *testing.T) {
 		call   func(c *Client) error
 		result any
 	}{
-		{"delete entry", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, map[string]any{"id": 200}},
+		{"delete entry", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, map[string]any{"id": "200"}}, // live API: string id
 		{"delete entry already gone", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, nil},
-		{"delete read", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, map[string]any{"id": 200}},
+		{"delete read", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, map[string]any{"id": 200}}, // live API: number id
 		{"delete read already gone", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, nil},
 	}
 	for _, tt := range tests {
