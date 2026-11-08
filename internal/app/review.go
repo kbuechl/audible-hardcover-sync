@@ -246,8 +246,8 @@ func userData(acts []state.SyncAction, d *hardcover.UserBookDetails) []string {
 }
 
 // Remove undoes the sync's logged Hardcover writes for asin, newest first,
-// then forgets them and marks the book Not wanted so the next sync leaves
-// it alone. Rows already gone on Hardcover count as removed. A Hardcover
+// then forgets them and the book's sync state and marks it Not wanted so
+// the next sync leaves it alone. Rows already gone on Hardcover count as removed. A Hardcover
 // error stops the walk and keeps the log and decision, so Remove can be
 // retried.
 func (a *App) Remove(ctx context.Context, asin string) error {
@@ -270,6 +270,11 @@ func (a *App) Remove(ctx context.Context, asin string) error {
 		}
 	}
 	if err := a.store.ClearActions(asin); err != nil {
+		return err
+	}
+	// Without its sync state the book counts as new, so turning it back
+	// to Sync adds it again instead of looking unchanged.
+	if err := a.store.Forget(asin); err != nil {
 		return err
 	}
 	return a.store.SetDecision([]string{asin}, state.DecisionNotWanted)

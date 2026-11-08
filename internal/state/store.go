@@ -156,6 +156,15 @@ func (s *Store) Get(asin string) (*BookState, error) {
 	return &bs, nil
 }
 
+// Forget deletes asin's sync state, so the next sync treats the book as
+// new. A missing row is not an error.
+func (s *Store) Forget(asin string) error {
+	if _, err := s.db.Exec(`DELETE FROM sync_state WHERE asin = ?`, asin); err != nil {
+		return fmt.Errorf("forget %q: %w", asin, err)
+	}
+	return nil
+}
+
 func (s *Store) Upsert(bs BookState) error {
 	_, err := s.db.Exec(`
 		INSERT INTO sync_state

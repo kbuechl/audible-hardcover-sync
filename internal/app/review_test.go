@@ -321,3 +321,53 @@ func TestRemove_NoActions(t *testing.T) {
 }
 
 func ptrFloat(f float64) *float64 { return &f }
+
+// Remove forgets the sync state, so turning the book back to Sync adds it
+// to Hardcover again instead of taking the unchanged shortcut.
+func TestRemoveForgetsSyncState(t *testing.T) {
+	a := newTestApp(t, nil)
+	a.removeHC = &fakeRemover{details: map[int64]*hardcover.UserBookDetails{200: {}}}
+	seedActions(t, a, state.SyncAction{Kind: state.ActionInserted, UserBookID: 200})
+	bookID := int64(777)
+	if err := a.store.Upsert(state.BookState{ASIN: "B1", Status: state.StatusFinished, HardcoverBookID: &bookID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Remove(context.Background(), "B1"); err != nil {
+		t.Fatal(err)
+	}
+	if bs, _ := a.store.Get("B1"); bs != nil {
+		t.Errorf("sync state = %+v, want forgotten", bs)
+	}
+	has, _ := a.store.HasActions("B1")
+	rb, _ := a.store.ReviewBook("B1")
+	if has || rb.Decision != state.DecisionNotWanted {
+		t.Errorf("actions kept=%v decision=%q, want cleared and not_wanted", has, rb.Decision)
+	}
+}
+
+// A promoted book whose second read delete fails keeps its log; the retry
+// deletes the already-gone read again (a no-op on Hardcover) and finishes.
+func TestRemove_PromotedPartialFailureRetries(t *testing.T) {
+	a := newTestApp(t, nil)
+	f := &fakeRemover{details: map[int64]*hardcover.UserBookDetails{200: {}}, failOn: "delete read 12"}
+	a.removeHC = f
+	seedActions(t, a, state.SyncAction{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusWantToRead, CreatedReadIDs: []int64{11, 12}})
+	if err := a.Remove(context.Background(), "B1"); err == nil {
+		t.Fatal("Remove() error = nil, want the read delete failure")
+	}
+	if has, _ := a.store.HasActions("B1"); !has {
+		t.Fatal("actions cleared after a failure, want kept for retry")
+	}
+	f.failOn, f.calls = "", nil
+	if err := a.Remove(context.Background(), "B1"); err != nil {
+		t.Fatalf("retry Remove() error = %v", err)
+	}
+	if want := []string{"delete read 11", "delete read 12", "status 200 1"}; !reflect.DeepEqual(f.calls, want) {
+		t.Errorf("retry calls = %v, want %v", f.calls, want)
+	}
+	has, _ := a.store.HasActions("B1")
+	rb, _ := a.store.ReviewBook("B1")
+	if has || rb.Decision != state.DecisionNotWanted {
+		t.Errorf("actions kept=%v decision=%q, want cleared and not_wanted", has, rb.Decision)
+	}
+}
