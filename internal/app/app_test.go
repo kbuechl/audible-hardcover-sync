@@ -11,6 +11,7 @@ import (
 
 	"github.com/kbuechl/audible-hardcover-sync/internal/config"
 	"github.com/kbuechl/audible-hardcover-sync/internal/state"
+	syncpkg "github.com/kbuechl/audible-hardcover-sync/internal/sync"
 )
 
 func newTestApp(t *testing.T, mutate func(*config.Config)) *App {
@@ -219,5 +220,29 @@ func TestPreferences_SyncModeAndReviewNotify(t *testing.T) {
 	}
 	if got, _ := a.Preferences(); got.SyncMode != "all" || got.ReviewNotify != "after_sync" {
 		t.Errorf("empty values = %+v", got)
+	}
+}
+
+type countingNotifier struct{ review []int }
+
+func (n *countingNotifier) NotifyUnmatched(context.Context, []state.BookState) error { return nil }
+func (n *countingNotifier) Configured() bool                                         { return true }
+func (n *countingNotifier) NotifyReview(_ context.Context, count int) error {
+	n.review = append(n.review, count)
+	return nil
+}
+
+// The review message counts books under the mode the sync ran with, even
+// if the saved mode changed while it ran.
+func TestNotifyWaitingUsesSyncMode(t *testing.T) {
+	a := newTestApp(t, nil)
+	if err := a.store.SeeReviewBook(state.ReviewBook{ASIN: "A1", Status: state.StatusFinished}); err != nil {
+		t.Fatal(err)
+	}
+	// Saved mode "all" holds nothing; the sync ran with confirm_all.
+	n := &countingNotifier{}
+	a.notifyWaiting(context.Background(), syncpkg.Deps{Notifier: n, SyncMode: "confirm_all"})
+	if len(n.review) != 1 || n.review[0] != 1 {
+		t.Errorf("NotifyReview calls = %v, want [1]", n.review)
 	}
 }

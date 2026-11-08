@@ -121,14 +121,15 @@ func (a *App) Sync(ctx context.Context) (state.SyncReport, error) {
 }
 
 // notifyWaiting tells the user about books newly waiting for review. A
-// failure is logged, never returned: the sync itself succeeded.
+// failure is logged, never returned: the sync itself succeeded. It counts
+// under deps.SyncMode, the mode the sync gated with, not a mode saved since.
 func (a *App) notifyWaiting(ctx context.Context, deps syncpkg.Deps) {
 	prefs, err := a.Preferences()
 	if err != nil {
 		slog.Error("read preferences for review message", "error", err)
 		return
 	}
-	if err := syncpkg.NotifyWaiting(ctx, a.store, deps.Notifier, prefs.SyncMode, prefs.ReviewNotify, time.Now()); err != nil {
+	if err := syncpkg.NotifyWaiting(ctx, a.store, deps.Notifier, deps.SyncMode, prefs.ReviewNotify, time.Now()); err != nil {
 		slog.Error("notify books waiting for review", "error", err)
 	}
 }
