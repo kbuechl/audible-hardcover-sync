@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Status } from './types'
 import { fetchStatus } from './api'
 import MatchesPage from './pages/MatchesPage'
+import ReviewPage from './pages/ReviewPage'
 import SetupPage from './pages/SetupPage'
 import NotificationsPage from './pages/NotificationsPage'
 import StatusPill from './components/StatusPill'
@@ -10,6 +11,7 @@ import VersionFooter from './components/VersionFooter'
 
 const tabs = [
   { id: 'matches', label: 'Matches' },
+  { id: 'review', label: 'Review' },
   { id: 'setup', label: 'Setup' },
   { id: 'notifications', label: 'Notifications' },
 ] as const
@@ -81,6 +83,7 @@ export default function App() {
           >
             {t.label}
             {t.id === 'setup' && needsSetup && <span className="ml-1.5 text-burgundy">•</span>}
+            {t.id === 'review' && (status?.waiting ?? 0) > 0 && <span className="ml-1.5 text-burgundy">•</span>}
           </a>
         ))}
         <div className="ml-auto pb-1.5">
@@ -90,6 +93,7 @@ export default function App() {
 
       <main key={active} className="fade-in">
         {active === 'matches' && <MatchesPage status={status} onSyncStarted={refresh} />}
+        {active === 'review' && <ReviewPage onChanged={refresh} />}
         {active === 'setup' && <SetupPage status={status} onChanged={refresh} />}
         {active === 'notifications' && <NotificationsPage />}
       </main>

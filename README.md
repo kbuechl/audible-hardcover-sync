@@ -31,8 +31,14 @@
   Currently Reading.
 - **Matches it can't make alone wait for you.** The web UI suggests the
   likeliest Hardcover book; confirm it in one tap, on desktop or phone.
+- **Choose which books sync.** On a shared Audible account, other
+  people's books don't have to land on your shelves. Sync everything, skip
+  shared books, or review them first on the Review page.
+- **Undo a sync.** Remove from Hardcover deletes what the sync added for a
+  book, and marks the book Not wanted so it stays gone.
 - **Notifications** to Discord, Slack, ntfy, Telegram, email and
-  [more](https://containrrr.dev/shoutrrr/) when books need you.
+  [more](https://containrrr.dev/shoutrrr/) when books need you, including
+  books waiting for your review.
 - **Set up entirely in the browser.** Connect Audible and Hardcover,
   pick a schedule and add notifications without touching a config file.
 
@@ -104,7 +110,13 @@ another device on your network, change `127.0.0.1:8080:8080` in
 > The first sync of a large library takes a while: Hardcover's free API
 > allows about 60 requests a minute, and the tool paces itself to that.
 > Afterwards, check **Matches** for books it couldn't place, and add a
-> **Notifications** service to hear about new ones.
+> **Notifications** service to hear about new ones. Sharing an Audible
+> account? Pick **Which books to sync** under Preferences before the first
+> sync (see [Review](#review)).
+
+<p align="center">
+  <img src="assets/screenshots/review.png" alt="The Review page: four shared audiobooks waiting, each with Sync and Not wanted buttons" width="860">
+</p>
 
 <table>
   <tr>
@@ -141,8 +153,8 @@ the web UI.
 
 ## Configuration
 
-Sync schedule, match strictness and the address used in notification
-links are set in the web UI under **Setup → Preferences**. The rest is
+Sync schedule, match strictness, which books sync and the address used in
+notification links are set in the web UI under **Setup → Preferences**. The rest is
 optional environment variables, set in `.env` or the service's
 `environment`.
 
@@ -223,6 +235,51 @@ folder.
 - **Start over**: Setup → Sync → **Reset sync history**. Your Hardcover
   library, logins and notification settings are kept; the next sync
   re-checks every book.
+
+## Review
+
+Your own books sync automatically, but books shared into your Audible
+account (which may have been listened to by someone else in the household)
+wait for your review out of the box. Choose what happens under **Setup →
+Preferences → Which books to sync**:
+
+| Mode | Your own books | Shared books |
+|---|---|---|
+| Sync everything | sync | sync |
+| Skip shared books | sync | left out, no messages |
+| Confirm shared books (default) | sync | wait on the Review page |
+| Confirm every book | wait on the Review page | wait on the Review page |
+
+Audible marks books shared from another account, but not whose they are,
+so "shared" means any book shared into yours. Upgrading switches to
+**Confirm shared books**: only new shared books wait. Changing the mode
+only affects books you haven't decided on: books already synced keep
+syncing and nothing is removed from Hardcover.
+
+The **Review** page has three lists: **Waiting**, **Synced** and **Not
+wanted**, with title search and select-all for bulk choices.
+
+- **Sync** sends the book through the normal sync on the next run. If it
+  can't be matched, it goes to Matches as usual.
+- **Not wanted** keeps a book out of Hardcover for good. It's hidden from
+  Waiting and from every message, and you can change it back from the Not
+  wanted list.
+- **Remove from Hardcover** undoes what the sync did for a book, for
+  books synced from this version on. A book the sync added is deleted from
+  Hardcover, along with its reads. A book the sync moved up from Want to
+  Read goes back to Want to Read, and only the reads the sync added are
+  deleted; the rating the sync set stays. A re-listen read the sync
+  started is deleted too. Afterwards the book is Not wanted, so the next
+  sync doesn't add it again; set it back to Sync to re-add it. If your own rating, review, notes or reads would go too, the
+  confirmation says so before anything is deleted. Anything you added on
+  Hardcover yourself is otherwise left alone.
+
+Your decisions survive **Reset sync history**.
+
+Under **Notifications → Books waiting for review**, pick how often to hear
+about waiting books: after each sync (default), once a day, once a week or
+Off. Each book is mentioned once, and a message always covers all new
+waiting books at once.
 
 ## Sync behavior
 

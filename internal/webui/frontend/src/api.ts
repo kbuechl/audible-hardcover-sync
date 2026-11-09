@@ -1,4 +1,4 @@
-import type { UnmatchedBook, SearchResultItem, Status, NotifyTarget, Preferences } from './types'
+import type { UnmatchedBook, SearchResultItem, Status, NotifyTarget, Preferences, ReviewFilter, ReviewDecision, ReviewItem, RemovePreview } from './types'
 
 async function fetchOK(input: RequestInfo, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, init)
@@ -110,4 +110,21 @@ export function fetchPreferences(): Promise<Preferences> {
 export async function savePreferences(p: Preferences): Promise<Preferences> {
   const res = await send('PUT', '/api/preferences', p)
   return (await res.json()) as Preferences
+}
+
+export function fetchReview(filter: ReviewFilter, q: string): Promise<ReviewItem[]> {
+  const params = new URLSearchParams({ filter, q })
+  return fetchJSON(`/api/review?${params.toString()}`)
+}
+
+export async function setReviewDecision(asins: string[], decision: ReviewDecision): Promise<void> {
+  await send('PUT', '/api/review/decision', { asins, decision })
+}
+
+export function previewRemove(asin: string): Promise<RemovePreview> {
+  return fetchJSON(`/api/review/${encodeURIComponent(asin)}/remove`)
+}
+
+export async function removeFromHardcover(asin: string): Promise<void> {
+  await send('POST', `/api/review/${encodeURIComponent(asin)}/remove`)
 }

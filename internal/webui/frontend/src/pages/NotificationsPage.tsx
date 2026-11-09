@@ -1,9 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { NotifyTarget } from '../types'
-import { addNotifyURL, fetchNotifyTargets, removeNotifyTarget, testNotifyTarget, testNotifyURL } from '../api'
+import type { NotifyTarget, Preferences } from '../types'
+import { addNotifyURL, fetchNotifyTargets, fetchPreferences, savePreferences, removeNotifyTarget, testNotifyTarget, testNotifyURL } from '../api'
 import { Button, Card, Notice } from '../components/ui'
 import { errorMessage, inputClass } from '../components/uiStyles'
 import { BellIcon } from '../components/icons'
+
+const reviewNotifyOptions: { value: Preferences['reviewNotify']; label: string }[] = [
+  { value: 'after_sync', label: 'After each sync' },
+  { value: 'daily', label: 'Once a day' },
+  { value: 'weekly', label: 'Once a week' },
+  { value: 'off', label: 'Off' },
+]
 
 type Result = { kind: 'ok' | 'error'; text: string }
 
@@ -14,11 +21,32 @@ export default function NotificationsPage() {
   const [formResult, setFormResult] = useState<Result | null>(null)
   const [rowResults, setRowResults] = useState<Record<number, Result>>({})
 
+  const [prefs, setPrefs] = useState<Preferences | null>(null)
+  const [reviewResult, setReviewResult] = useState<Result | null>(null)
+
   const reload = () => fetchNotifyTargets().then(setTargets)
 
   useEffect(() => {
     reload().catch((err) => setFormResult({ kind: 'error', text: errorMessage(err) }))
   }, [])
+
+  useEffect(() => {
+    fetchPreferences()
+      .then(setPrefs)
+      .catch((err) => setReviewResult({ kind: 'error', text: errorMessage(err) }))
+  }, [])
+
+  // Saves the full preferences object with one field changed, so nothing else is clobbered.
+  const changeReviewNotify = async (reviewNotify: Preferences['reviewNotify']) => {
+    if (prefs === null) return
+    setReviewResult(null)
+    try {
+      setPrefs(await savePreferences({ ...prefs, reviewNotify }))
+      setReviewResult({ kind: 'ok', text: 'Saved.' })
+    } catch (err) {
+      setReviewResult({ kind: 'error', text: errorMessage(err) })
+    }
+  }
 
   const run = async (action: () => Promise<void>, ok: string) => {
     setBusy(true)
@@ -95,6 +123,33 @@ export default function NotificationsPage() {
             </li>
           ))}
         </ul>
+      </Card>
+
+      <Card title="Books waiting for review" icon={<BellIcon />}>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="reviewNotify" className="text-sm font-semibold">
+            Review message
+          </label>
+          <select
+            id="reviewNotify"
+            aria-describedby="reviewNotify-hint"
+            className={inputClass}
+            value={prefs?.reviewNotify ?? ''}
+            disabled={prefs === null}
+            onChange={(e) => changeReviewNotify(e.target.value as Preferences['reviewNotify'])}
+          >
+            {prefs === null && <option value="" hidden />}
+            {reviewNotifyOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <span id="reviewNotify-hint" className="text-xs text-muted">
+            How often to get a message about books waiting on the Review page.
+          </span>
+        </div>
+        {reviewResult && <div className="mt-3"><Notice kind={reviewResult.kind}>{reviewResult.text}</Notice></div>}
       </Card>
 
       <Card title="Add a service">

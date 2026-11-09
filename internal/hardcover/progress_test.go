@@ -2,6 +2,7 @@ package hardcover
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -40,14 +41,19 @@ func TestClient_FetchUserBooks_LatestReadProgress(t *testing.T) {
 
 func TestClient_InsertUserBook_ReturnsID(t *testing.T) {
 	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
-		return map[string]any{"insert_user_book": map[string]any{"id": 4321}}, nil
+		if !strings.Contains(query, "user_book_reads { id }") {
+			t.Errorf("insert query = %q, want the entry's reads selected", query)
+		}
+		return map[string]any{"insert_user_book": map[string]any{"id": 4321, "user_book": map[string]any{
+			"user_book_reads": []any{map[string]any{"id": 55}},
+		}}}, nil
 	})
-	id, err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil, nil)
+	id, reads, err := c.InsertUserBook(context.Background(), 777, StatusCurrentlyReading, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("InsertUserBook() error = %v", err)
 	}
-	if id != 4321 {
-		t.Errorf("InsertUserBook() id = %d, want 4321", id)
+	if id != 4321 || !slices.Equal(reads, []int64{55}) {
+		t.Errorf("InsertUserBook() = %d, %v; want 4321, [55]", id, reads)
 	}
 }
 

@@ -83,6 +83,10 @@ func startRelisten(ctx context.Context, d Deps, item audible.LibraryItem, status
 		return false
 	}
 	slog.Info("re-listen started", "asin", item.ASIN, "title", item.Title, "read_id", readID)
+	// StartRead may adopt a read that was already open; only a new one is ours.
+	if !slices.Contains(existing.OpenReadIDs, readID) {
+		recordAction(d, state.SyncAction{ASIN: item.ASIN, Kind: state.ActionReadStarted, UserBookID: existing.ID, ReadID: readID})
+	}
 	persist(d, item, status, item.PercentComplete, bookID, &readID)
 	return true
 }
@@ -173,7 +177,9 @@ func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, st
 	if status == state.StatusFinished {
 		statusID, rating, userDate = hardcover.StatusRead, item.Rating, item.FinishedAt
 	}
-	if err := d.Hardcover.UpdateUserBookStatus(ctx, existing.ID, statusID, rating, userDate); err != nil {
+	priorReads, priorOK := readIDs(ctx, d, item, existing.ID)
+	after, err := d.Hardcover.UpdateUserBookStatus(ctx, existing.ID, statusID, rating, userDate)
+	if err != nil {
 		slog.Error("move hardcover book off want to read", "asin", item.ASIN, "book_id", bookID, "error", err)
 		return false
 	}
@@ -194,6 +200,19 @@ func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, st
 			}
 		}
 	}
+	// A read SetReadProgress adds later is not claimed, so Remove leaves
+	// it (under-delete, safe).
+	// Without the reads from before the write, which reads are new is
+	// unknown, so none are claimed.
+	var created []int64
+	if priorOK {
+		created = createdSince(priorReads, after)
+	}
+	recordAction(d, state.SyncAction{
+		ASIN: item.ASIN, Kind: state.ActionPromoted, UserBookID: existing.ID,
+		PrevStatusID: hardcover.StatusWantToRead, PriorReadIDs: priorReads,
+		Rating: rating, CreatedReadIDs: created,
+	})
 	persist(d, item, status, percent, bookID, nil)
 	return true
 }

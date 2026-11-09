@@ -23,6 +23,41 @@ type fakeService struct {
 	targets    []app.NotifyTarget
 	testErr    error
 	prefsErr   error
+
+	reviewItems []app.ReviewItem
+	waiting     int
+	decideErr   error
+	waitingErr  error
+	hidden      map[string]bool
+	gotFilter   string
+	gotQ        string
+	gotASINs    []string
+	gotDecision state.Decision
+
+	preview   app.RemovePreview
+	removeErr error
+	removed   string
+}
+
+func (f *fakeService) PreviewRemove(_ context.Context, asin string) (app.RemovePreview, error) {
+	return f.preview, f.removeErr
+}
+func (f *fakeService) Remove(_ context.Context, asin string) error {
+	f.removed = asin
+	return f.removeErr
+}
+
+func (f *fakeService) ReviewBooks(filter, q string) ([]app.ReviewItem, error) {
+	f.gotFilter, f.gotQ = filter, q
+	return f.reviewItems, nil
+}
+func (f *fakeService) SetReviewDecision(asins []string, d state.Decision) error {
+	f.gotASINs, f.gotDecision = asins, d
+	return f.decideErr
+}
+func (f *fakeService) WaitingCount() (int, error) { return f.waiting, f.waitingErr }
+func (f *fakeService) HiddenFromMatches([]string) (map[string]bool, error) {
+	return f.hidden, nil
 }
 
 func (f *fakeService) Preferences() (state.Preferences, error) {

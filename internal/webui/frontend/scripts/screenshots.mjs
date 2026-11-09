@@ -19,6 +19,7 @@ const status = {
   audible: { connected: true },
   hardcover: { connected: true, username: 'reader', fromEnv: false },
   sync: { running: false, last: { finishedAt: minutesAgo(12), synced: 3, unchanged: 241, unmatched: 3, errored: 0 } },
+  waiting: 4,
 }
 
 const unmatched = [
@@ -39,7 +40,20 @@ const notifications = [
   { id: 1, masked: 'gotify://gotify.home.lan/' },
 ]
 
-const preferences = { syncInterval: '30m0s', matchConfidence: 'strict', publicUrl: 'http://192.168.1.10:8080' }
+const preferences = {
+  syncInterval: '30m0s',
+  matchConfidence: 'strict',
+  publicUrl: 'http://192.168.1.10:8080',
+  syncMode: 'confirm_shared',
+  reviewNotify: 'after_sync',
+}
+
+const reviewWaiting = [
+  { asin: 'B0DEMO0011', title: 'Pride and Prejudice', author: 'Jane Austen', shared: true, status: 'finished', percentComplete: 100, decision: '', canRemove: false },
+  { asin: 'B0DEMO0012', title: 'Frankenstein; or, The Modern Prometheus', author: 'Mary Shelley', shared: true, status: 'in_progress', percentComplete: 63, decision: '', canRemove: false },
+  { asin: 'B0DEMO0013', title: 'Dracula', author: 'Bram Stoker', shared: true, status: 'in_progress', percentComplete: 18, decision: '', canRemove: false },
+  { asin: 'B0DEMO0014', title: 'Great Expectations', author: 'Charles Dickens', shared: true, status: 'finished', percentComplete: 100, decision: '', canRemove: false },
+]
 
 async function mockAPI(page) {
   await page.route('**/api/**', (route) => {
@@ -48,6 +62,10 @@ async function mockAPI(page) {
     if (path === '/api/unmatched') return route.fulfill({ json: unmatched })
     if (path.startsWith('/api/unmatched/')) {
       return route.fulfill({ json: unmatched.find((b) => path.endsWith(b.asin)) })
+    }
+    if (path === '/api/review') {
+      const filter = new URL(route.request().url()).searchParams.get('filter') ?? 'waiting'
+      return route.fulfill({ json: filter === 'waiting' ? reviewWaiting : [] })
     }
     if (path === '/api/search') return route.fulfill({ json: search })
     if (path === '/api/notifications') return route.fulfill({ json: notifications })
@@ -59,6 +77,7 @@ async function mockAPI(page) {
 const shots = [
   { name: 'matches', hash: 'matches', theme: 'light', size: 'desktop', open: 'Moby-Dick; or, The Whale' },
   { name: 'setup', hash: 'setup', theme: 'light', size: 'desktop', fullPage: true },
+  { name: 'review', hash: 'review', theme: 'light', size: 'desktop' },
   { name: 'notifications', hash: 'notifications', theme: 'light', size: 'desktop' },
   { name: 'phone-matches', hash: 'matches', theme: 'light', size: 'phone', open: 'Moby-Dick; or, The Whale', scrollTo: 'Resolve match' },
   { name: 'phone-setup', hash: 'setup', theme: 'light', size: 'phone' },

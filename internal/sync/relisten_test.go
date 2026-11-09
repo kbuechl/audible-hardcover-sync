@@ -215,3 +215,31 @@ func TestRun_FinishedWithoutDateClearsHardcoverDate(t *testing.T) {
 		})
 	}
 }
+
+func TestRelisten_NotWantedGetsNoWrites(t *testing.T) {
+	restart := ptrTime("2026-10-18T05:29:00Z")
+	fh, store := newRelistenFixture(t, readBook("2026-06-27"), nil)
+	fa := &fakeAudible{items: []audible.LibraryItem{relistenItem(2, false, restart)}}
+	runOnce(t, fa, fh, store) // opens the re-listen read
+	var readID int64
+	for id := range fh.reads {
+		readID = id
+	}
+	if err := store.SetDecision([]string{"A1"}, state.DecisionNotWanted); err != nil {
+		t.Fatal(err)
+	}
+
+	fa.items = []audible.LibraryItem{relistenItem(50, false, restart)}
+	res := runOnce(t, fa, fh, store)
+	if res.Skipped != 1 {
+		t.Errorf("Result = %+v, want Skipped 1", res)
+	}
+	if got := fh.reads[readID].progressSeconds; got != 720 {
+		t.Errorf("progress = %d, want unchanged 720", got)
+	}
+	fa.items = []audible.LibraryItem{relistenItem(100, true, ptrTime("2026-11-02T20:00:00Z"))}
+	runOnce(t, fa, fh, store)
+	if fh.reads[readID].finishedAt != nil || len(fh.reads) != 1 {
+		t.Errorf("read finished or duplicated for a Not wanted book: %+v", fh.reads)
+	}
+}

@@ -45,6 +45,8 @@ type App struct {
 	syncing atomic.Bool
 
 	prefsChanged chan struct{}
+
+	removeHC hardcoverRemover // test seam for Remove; nil uses hc
 }
 
 // New loads the Hardcover token (from the environment, or the one saved
@@ -111,9 +113,25 @@ func (a *App) Sync(ctx context.Context) (state.SyncReport, error) {
 	if err != nil {
 		return report, err
 	}
+	a.notifyWaiting(ctx, deps)
 	slog.Info("sync complete", "synced", result.Synced, "unchanged", result.Unchanged,
-		"unmatched", result.Unmatched, "errored", result.Errored)
+		"unmatched", result.Unmatched, "errored", result.Errored,
+		"waiting", result.Waiting, "skipped", result.Skipped)
 	return report, nil
+}
+
+// notifyWaiting tells the user about books newly waiting for review. A
+// failure is logged, never returned: the sync itself succeeded. It counts
+// under deps.SyncMode, the mode the sync gated with, not a mode saved since.
+func (a *App) notifyWaiting(ctx context.Context, deps syncpkg.Deps) {
+	prefs, err := a.Preferences()
+	if err != nil {
+		slog.Error("read preferences for review message", "error", err)
+		return
+	}
+	if err := syncpkg.NotifyWaiting(ctx, a.store, deps.Notifier, deps.SyncMode, prefs.ReviewNotify, time.Now()); err != nil {
+		slog.Error("notify books waiting for review", "error", err)
+	}
 }
 
 // syncDeps builds a sync's dependencies, failing with ErrNotConnected when
@@ -141,6 +159,7 @@ func (a *App) syncDeps() (syncpkg.Deps, error) {
 		Store:           a.store,
 		Notifier:        notify.New(urls, prefs.PublicURL),
 		MatchConfidence: matchConfidences[prefs.MatchConfidence],
+		SyncMode:        prefs.SyncMode,
 	}, nil
 }
 

@@ -106,3 +106,36 @@ func TestBuildMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildReviewMessage(t *testing.T) {
+	tests := []struct {
+		name, publicURL, want string
+		count                 int
+	}{
+		{"with public URL", "http://homeserver.local:8080", "3 book(s) waiting for review on Hardcover sync: http://homeserver.local:8080/#review", 3},
+		{"trailing slash", "http://homeserver.local:8080/", "1 book(s) waiting for review on Hardcover sync: http://homeserver.local:8080/#review", 1},
+		{"no public URL", "", "2 book(s) waiting for review on Hardcover sync. Open the web UI to review them.", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildReviewMessage(tt.count, tt.publicURL); got != tt.want {
+				t.Errorf("buildReviewMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNotifier_NotifyReview_NoOp(t *testing.T) {
+	if err := New(nil, "").NotifyReview(context.Background(), 2); err != nil {
+		t.Errorf("no URLs: error = %v", err)
+	}
+	if err := New([]string{"bogus://x"}, "").NotifyReview(context.Background(), 0); err != nil {
+		t.Errorf("zero count: error = %v", err)
+	}
+}
+
+func TestNotifier_Configured(t *testing.T) {
+	if New(nil, "").Configured() || !New([]string{"x://y"}, "").Configured() {
+		t.Error("Configured() should follow whether URLs are set")
+	}
+}

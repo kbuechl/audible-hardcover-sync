@@ -2,6 +2,9 @@ package hardcover
 
 import (
 	"context"
+	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -116,7 +119,7 @@ func TestClient_UpdateUserBookStatus(t *testing.T) {
 		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": "not yours"}}, nil
 	})
 	finished := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	err := c.UpdateUserBookStatus(context.Background(), 200, StatusRead, &rating, &finished)
+	_, err := c.UpdateUserBookStatus(context.Background(), 200, StatusRead, &rating, &finished)
 	if err == nil || !strings.Contains(err.Error(), "not yours") {
 		t.Errorf("UpdateUserBookStatus() error = %v, want mutation error surfaced", err)
 	}
@@ -128,9 +131,121 @@ func TestClient_UpdateUserBookStatus_StatusOnly(t *testing.T) {
 		if obj["status_id"] != float64(StatusCurrentlyReading) || len(obj) != 1 {
 			t.Errorf("update object = %v, want only status_id", obj)
 		}
-		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": nil}}, nil
+		if !strings.Contains(query, "user_book_reads { id }") {
+			t.Errorf("update query = %q, want the entry's reads selected", query)
+		}
+		return map[string]any{"update_user_book": map[string]any{"id": 200, "error": nil, "user_book": map[string]any{
+			"user_book_reads": []any{map[string]any{"id": 7}, map[string]any{"id": 8}},
+		}}}, nil
 	})
-	if err := c.UpdateUserBookStatus(context.Background(), 200, StatusCurrentlyReading, nil, nil); err != nil {
-		t.Errorf("UpdateUserBookStatus() error = %v", err)
+	reads, err := c.UpdateUserBookStatus(context.Background(), 200, StatusCurrentlyReading, nil, nil)
+	if err != nil || !slices.Equal(reads, []int64{7, 8}) {
+		t.Errorf("UpdateUserBookStatus() = %v, %v; want [7 8]", reads, err)
+	}
+}
+
+func TestClient_ReadIDs(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if !strings.Contains(query, "user_book_reads") || vars["id"] != float64(200) {
+			t.Errorf("query = %q vars = %v", query, vars)
+		}
+		return map[string]any{"user_book_reads": []map[string]any{{"id": 11}, {"id": 12}}}, nil
+	})
+	ids, err := c.ReadIDs(context.Background(), 200)
+	if err != nil {
+		t.Fatalf("ReadIDs() error = %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 11 || ids[1] != 12 {
+		t.Errorf("ReadIDs() = %v, want [11 12]", ids)
+	}
+}
+
+func TestClient_DeleteUserBookAndRead(t *testing.T) {
+	tests := []struct {
+		name   string
+		field  string
+		call   func(c *Client) error
+		result any
+	}{
+		{"delete entry", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, map[string]any{"id": "200"}}, // live API: string id
+		{"delete entry already gone", "delete_user_book", func(c *Client) error { return c.DeleteUserBook(context.Background(), 200) }, nil},
+		{"delete read", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, map[string]any{"id": 200}}, // live API: number id
+		{"delete read already gone", "delete_user_book_read", func(c *Client) error { return c.DeleteRead(context.Background(), 200) }, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+				if !strings.Contains(query, tt.field+"(") || vars["id"] != float64(200) {
+					t.Errorf("query = %q vars = %v", query, vars)
+				}
+				return map[string]any{tt.field: tt.result}, nil
+			})
+			if err := tt.call(c); err != nil {
+				t.Errorf("error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestClient_DeleteUserBook_SurfacesGraphQLError(t *testing.T) {
+	_, c := newTestServer(t, func(string, map[string]any) (any, error) {
+		return nil, errors.New("not yours")
+	})
+	if err := c.DeleteUserBook(context.Background(), 200); err == nil || !strings.Contains(err.Error(), "not yours") {
+		t.Errorf("DeleteUserBook() error = %v, want graphql error", err)
+	}
+	if err := c.DeleteRead(context.Background(), 200); err == nil || !strings.Contains(err.Error(), "not yours") {
+		t.Errorf("DeleteRead() error = %v, want graphql error", err)
+	}
+}
+
+func TestClient_UserBookDetails(t *testing.T) {
+	tests := []struct {
+		name  string
+		books []map[string]any
+		want  *UserBookDetails
+	}{
+		{"gone", []map[string]any{}, nil},
+		{"bare entry", []map[string]any{{"rating": nil, "has_review": false, "private_notes": nil, "user_book_reads": []map[string]any{}}}, &UserBookDetails{ReadIDs: []int64{}}},
+		{"rated reviewed with notes and reads", []map[string]any{{"rating": 4.5, "has_review": true, "private_notes": "hm", "user_book_reads": []map[string]any{{"id": 11}, {"id": 12}}}},
+			&UserBookDetails{Rating: ptrF(4.5), HasReview: true, HasNotes: true, ReadIDs: []int64{11, 12}}},
+		{"empty notes are no notes", []map[string]any{{"rating": nil, "has_review": false, "private_notes": "", "user_book_reads": []map[string]any{}}}, &UserBookDetails{ReadIDs: []int64{}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+				if !strings.Contains(query, "user_books(") || vars["id"] != float64(200) {
+					t.Errorf("query = %q vars = %v", query, vars)
+				}
+				return map[string]any{"user_books": tt.books}, nil
+			})
+			got, err := c.UserBookDetails(context.Background(), 200)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("UserBookDetails() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func ptrF(f float64) *float64 { return &f }
+
+// A mutation that returns no user_book yields no read ids, not a panic.
+func TestClient_NullUserBookReads(t *testing.T) {
+	_, c := newTestServer(t, func(query string, vars map[string]any) (any, error) {
+		if strings.Contains(query, "insert_user_book") {
+			return map[string]any{"insert_user_book": map[string]any{"id": 9, "user_book": nil}}, nil
+		}
+		return map[string]any{"update_user_book": map[string]any{"id": 9, "error": nil, "user_book": nil}}, nil
+	})
+	id, reads, err := c.InsertUserBook(context.Background(), 777, StatusRead, nil, nil, nil)
+	if err != nil || id != 9 || reads != nil {
+		t.Errorf("InsertUserBook() = %d, %v, %v; want 9, nil, nil", id, reads, err)
+	}
+	reads, err = c.UpdateUserBookStatus(context.Background(), 9, StatusRead, nil, nil)
+	if err != nil || reads != nil {
+		t.Errorf("UpdateUserBookStatus() = %v, %v; want nil, nil", reads, err)
 	}
 }

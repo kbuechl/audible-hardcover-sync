@@ -12,7 +12,7 @@ const connectedStatus = {
 
 describe('App resolve flow', () => {
   beforeEach(() => {
-    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '' })
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'confirm_shared', reviewNotify: 'after_sync' })
     window.location.hash = ''
     vi.spyOn(api, 'fetchStatus').mockResolvedValue(connectedStatus)
     vi.spyOn(api, 'fetchUnmatched').mockResolvedValue([
@@ -105,7 +105,7 @@ describe('App resolve flow', () => {
 
 describe('App navigation', () => {
   beforeEach(() => {
-    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '' })
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'confirm_shared', reviewNotify: 'after_sync' })
     window.location.hash = ''
     vi.spyOn(api, 'fetchUnmatched').mockResolvedValue([])
   })

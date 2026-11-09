@@ -27,13 +27,14 @@ type HardcoverClient interface {
 	FindDefaultEdition(ctx context.Context, bookID int64) (*int64, error)
 	SearchBooks(ctx context.Context, query string, perPage int) ([]hardcover.SearchResult, error)
 	FetchUserBooks(ctx context.Context) (map[int64]hardcover.UserBook, error)
-	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, error)
+	InsertUserBook(ctx context.Context, bookID int64, statusID int, rating *int, userDate *time.Time, editionID *int64) (int64, []int64, error)
 	SetReadProgress(ctx context.Context, userBookID int64, percent float64, fallbackSeconds int) error
 	StartRead(ctx context.Context, userBookID int64, startedAt time.Time, progressSeconds int) (int64, error)
 	UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error
 	FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error
 	ClearFinishDate(ctx context.Context, userBookID int64) error
-	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) error
+	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error)
+	ReadIDs(ctx context.Context, userBookID int64) ([]int64, error)
 }
 
 // Notifier delivers a notification for library items that could not be
@@ -41,6 +42,10 @@ type HardcoverClient interface {
 // for real; sync.Run only depends on the interface shape.
 type Notifier interface {
 	NotifyUnmatched(ctx context.Context, items []state.BookState) error
+	// Configured reports whether a message could be delivered at all.
+	Configured() bool
+	// NotifyReview says count books are waiting for the user's review.
+	NotifyReview(ctx context.Context, count int) error
 }
 
 // Deps bundles Run's dependencies so they can be swapped for fakes in tests.
@@ -58,6 +63,9 @@ type Deps struct {
 	// scoring docs. This is a deliberate per-user choice; the default
 	// ("strict", 0.95) is nowhere near that risk zone.
 	MatchConfidence float64
+	// SyncMode decides which undecided books sync (ModeAll and friends);
+	// empty behaves as ModeAll.
+	SyncMode string
 }
 
 // Result summarizes the outcome of a sync pass.
@@ -66,6 +74,8 @@ type Result struct {
 	Unchanged int
 	Unmatched int
 	Errored   int
+	Waiting   int // held for the user's review
+	Skipped   int // Not wanted, or shared under skip_shared
 }
 
 // Run performs one sync pass: for each Audible library item, it computes
@@ -112,7 +122,26 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 			continue
 		}
 
+		// Every book the sync would act on is listed for review, and held
+		// or skipped books get no Hardcover writes at all.
+		rb, ok := seeReviewBook(d.Store, item, status)
+		if !ok {
+			result.Errored++ // decision unknown: no Hardcover writes
+			continue
+		}
+		if !allowed(d.SyncMode, item, rb) {
+			if Held(d.SyncMode, item.Shared, decisionOf(rb)) {
+				result.Waiting++
+			} else {
+				result.Skipped++
+			}
+			continue
+		}
+
 		if prior != nil && !prior.Unmatched && prior.Status == status && !progressedSince(item, status, prior) {
+			if prior.HardcoverBookID != nil {
+				markSynced(d, item, rb)
+			}
 			result.Unchanged++
 			continue
 		}
@@ -160,6 +189,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		// progress on a Currently Reading book, which only moves forward,
 		// and re-listens, which add a new read (see syncExisting).
 		if existing, hasExisting := userBooks[bookID]; hasExisting {
+			markSynced(d, item, rb)
 			if syncExisting(ctx, d, item, status, existing, prior, bookID) {
 				result.Synced++
 			} else {
@@ -177,7 +207,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		}
 
 		// New book — insert it with status, edition, date, and rating.
-		userBookID, err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID)
+		userBookID, created, err := d.Hardcover.InsertUserBook(ctx, bookID, statusID, item.Rating, userDate, resolved.EditionID)
 		if err != nil {
 			slog.Error("insert hardcover user_book", "asin", item.ASIN, "book_id", bookID, "error", err)
 			result.Errored++
@@ -188,6 +218,7 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 		}
 
 		slog.Info("added book to hardcover", "title", item.Title, "book_id", bookID, "status", status)
+		markSynced(d, item, rb)
 
 		// Audible can mark a book finished without a date (e.g. "mark as
 		// finished" partway through). Hardcover would fill in today, so the
@@ -209,6 +240,14 @@ func Run(ctx context.Context, d Deps) (Result, error) {
 				}
 			}
 		}
+
+		// Every read the insert returned was made by this sync. A read
+		// SetReadProgress adds later is not claimed: Remove deletes the
+		// whole entry anyway, so at worst its preview over-counts.
+		recordAction(d, state.SyncAction{
+			ASIN: item.ASIN, Kind: state.ActionInserted, UserBookID: userBookID,
+			Rating: item.Rating, CreatedReadIDs: created,
+		})
 
 		if err := d.Store.Upsert(state.BookState{
 			ASIN:            item.ASIN,

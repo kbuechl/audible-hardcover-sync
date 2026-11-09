@@ -34,6 +34,14 @@ type Service interface {
 	TestNotifyTarget(id int) error
 	Preferences() (state.Preferences, error)
 	SavePreferences(p state.Preferences) error
+	ReviewBooks(filter, q string) ([]app.ReviewItem, error)
+	SetReviewDecision(asins []string, d state.Decision) error
+	WaitingCount() (int, error)
+	// HiddenFromMatches returns the ASINs among asins that the Matches
+	// list should hide (Not wanted, or held under the current mode).
+	HiddenFromMatches(asins []string) (map[string]bool, error)
+	PreviewRemove(ctx context.Context, asin string) (app.RemovePreview, error)
+	Remove(ctx context.Context, asin string) error
 }
 
 // WithService adds the setup, sync and notification endpoints, and makes
@@ -58,6 +66,10 @@ func (s *Server) registerServiceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/notifications/{id}/test", s.handleNotifyTestTarget)
 	mux.HandleFunc("GET /api/preferences", s.handlePreferencesGet)
 	mux.HandleFunc("PUT /api/preferences", s.handlePreferencesPut)
+	mux.HandleFunc("GET /api/review", s.handleReviewList)
+	mux.HandleFunc("PUT /api/review/decision", s.handleReviewDecision)
+	mux.HandleFunc("GET /api/review/{asin}/remove", s.handleRemovePreview)
+	mux.HandleFunc("POST /api/review/{asin}/remove", s.handleRemove)
 }
 
 type statusDTO struct {
@@ -65,6 +77,7 @@ type statusDTO struct {
 	Hardcover app.HardcoverStatus `json:"hardcover"`
 	Sync      syncStatusDTO       `json:"sync"`
 	Version   string              `json:"version"`
+	Waiting   int                 `json:"waiting"`
 }
 
 type syncStatusDTO struct {
@@ -78,11 +91,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// The count is secondary; the rest of the status must still load.
+	waiting, err := s.svc.WaitingCount()
+	if err != nil {
+		slog.Error("count books waiting for review", "error", err)
+		waiting = 0
+	}
 	writeJSON(w, http.StatusOK, statusDTO{
 		Audible:   s.svc.AudibleStatus(),
 		Hardcover: s.svc.HardcoverStatus(r.Context()),
 		Sync:      syncStatusDTO{Running: s.svc.Syncing(), Last: last},
 		Version:   s.version,
+		Waiting:   waiting,
 	})
 }
 

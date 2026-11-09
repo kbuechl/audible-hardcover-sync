@@ -88,8 +88,23 @@ func (s *Server) handleAPIUnmatchedList(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Held and Not wanted books belong on the Review page, not in Matches.
+	var hidden map[string]bool
+	if s.svc != nil {
+		asins := make([]string, len(items))
+		for i, bs := range items {
+			asins[i] = bs.ASIN
+		}
+		if hidden, err = s.svc.HiddenFromMatches(asins); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	dtos := make([]unmatchedBookDTO, 0, len(items))
 	for _, bs := range items {
+		if hidden[bs.ASIN] {
+			continue
+		}
 		dtos = append(dtos, toUnmatchedBookDTO(bs))
 	}
 	writeJSON(w, http.StatusOK, dtos)

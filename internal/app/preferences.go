@@ -18,7 +18,16 @@ var SyncIntervals = []time.Duration{
 const (
 	defaultSyncInterval    = 6 * time.Hour
 	defaultMatchConfidence = "strict"
+	defaultSyncMode        = "confirm_shared"
+	defaultReviewNotify    = "after_sync"
 )
+
+// SyncModes are the choices for which Audible books sync to Hardcover.
+var SyncModes = []string{"all", "skip_shared", "confirm_shared", "confirm_all"}
+
+// ReviewNotifyOptions are the choices for how often the "books waiting for
+// review" message is sent.
+var ReviewNotifyOptions = []string{"after_sync", "daily", "weekly", "off"}
 
 // matchConfidences maps each preset to the minimum fuzzy-match score.
 var matchConfidences = map[string]float64{"strict": 0.95, "medium": 0.75, "loose": 0.55}
@@ -35,6 +44,12 @@ func (a *App) Preferences() (state.Preferences, error) {
 	if _, ok := matchConfidences[p.MatchConfidence]; !ok {
 		p.MatchConfidence = defaultMatchConfidence
 	}
+	if !slices.Contains(SyncModes, p.SyncMode) {
+		p.SyncMode = defaultSyncMode
+	}
+	if !slices.Contains(ReviewNotifyOptions, p.ReviewNotify) {
+		p.ReviewNotify = defaultReviewNotify
+	}
 	return p, nil
 }
 
@@ -48,11 +63,28 @@ func (a *App) SavePreferences(p state.Preferences) error {
 	if _, ok := matchConfidences[p.MatchConfidence]; !ok {
 		return fmt.Errorf("match confidence must be strict, medium or loose, not %q", p.MatchConfidence)
 	}
+	// Empty means the default, so older clients that omit these still work.
+	syncMode, reviewNotify := p.SyncMode, p.ReviewNotify
+	if syncMode == "" {
+		syncMode = defaultSyncMode
+	}
+	if reviewNotify == "" {
+		reviewNotify = defaultReviewNotify
+	}
+	if !slices.Contains(SyncModes, syncMode) {
+		return fmt.Errorf("sync mode %q isn't one of the offered choices", p.SyncMode)
+	}
+	if !slices.Contains(ReviewNotifyOptions, reviewNotify) {
+		return fmt.Errorf("review message frequency %q isn't one of the offered choices", p.ReviewNotify)
+	}
 	publicURL, err := cleanPublicURL(p.PublicURL)
 	if err != nil {
 		return err
 	}
-	saved := state.Preferences{SyncInterval: d.String(), MatchConfidence: p.MatchConfidence, PublicURL: publicURL}
+	saved := state.Preferences{
+		SyncInterval: d.String(), MatchConfidence: p.MatchConfidence, PublicURL: publicURL,
+		SyncMode: syncMode, ReviewNotify: reviewNotify,
+	}
 	if err := a.store.SetPreferences(saved); err != nil {
 		return err
 	}

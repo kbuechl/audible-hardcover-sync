@@ -289,3 +289,19 @@ func TestStore_Open_AddsCoverURLToExistingDB(t *testing.T) {
 		}
 	}
 }
+
+func TestForgetDeletesRow(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.Upsert(BookState{ASIN: "A1", Status: StatusFinished}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Forget("A1"); err != nil {
+		t.Fatalf("Forget() error = %v", err)
+	}
+	if got, err := s.Get("A1"); err != nil || got != nil {
+		t.Errorf("Get() = %+v, %v; want nil", got, err)
+	}
+	if err := s.Forget("missing"); err != nil {
+		t.Errorf("Forget(missing) error = %v", err)
+	}
+}
