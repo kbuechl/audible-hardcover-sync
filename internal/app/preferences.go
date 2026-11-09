@@ -18,7 +18,7 @@ var SyncIntervals = []time.Duration{
 const (
 	defaultSyncInterval    = 6 * time.Hour
 	defaultMatchConfidence = "strict"
-	defaultSyncMode        = "all"
+	defaultSyncMode        = "confirm_shared"
 	defaultReviewNotify    = "after_sync"
 )
 

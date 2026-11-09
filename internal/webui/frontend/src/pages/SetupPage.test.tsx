@@ -14,7 +14,7 @@ const base: Status = {
 describe('SetupPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'all', reviewNotify: 'after_sync' })
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'confirm_shared', reviewNotify: 'after_sync' })
     vi.spyOn(window, 'open').mockReturnValue(null)
   })
 
@@ -59,7 +59,7 @@ describe('SetupPage', () => {
 
   it('offers the sync mode choice while setup is unfinished', async () => {
     render(<SetupPage status={base} onChanged={vi.fn()} />)
-    expect(await screen.findByLabelText('Sync everything')).toBeChecked()
+    expect(await screen.findByLabelText('Confirm shared books')).toBeChecked()
     expect(screen.getByLabelText('Skip shared books')).toBeInTheDocument()
     expect(screen.getByLabelText('Confirm shared books')).toBeInTheDocument()
     expect(screen.getByLabelText('Confirm every book')).toBeInTheDocument()

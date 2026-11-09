@@ -7,7 +7,7 @@ import * as api from '../api'
 describe('PreferencesCard', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'all', reviewNotify: 'after_sync' })
+    vi.spyOn(api, 'fetchPreferences').mockResolvedValue({ syncInterval: '6h0m0s', matchConfidence: 'strict', publicUrl: '', syncMode: 'confirm_shared', reviewNotify: 'after_sync' })
   })
 
   it('saves changed preferences', async () => {
@@ -19,7 +19,7 @@ describe('PreferencesCard', () => {
     await user.click(screen.getByRole('button', { name: /use http/i }))
     await user.click(screen.getByRole('button', { name: /save preferences/i }))
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith({ syncInterval: '30m0s', matchConfidence: 'medium', publicUrl: window.location.origin, syncMode: 'all', reviewNotify: 'after_sync' }),
+      expect(save).toHaveBeenCalledWith({ syncInterval: '30m0s', matchConfidence: 'medium', publicUrl: window.location.origin, syncMode: 'confirm_shared', reviewNotify: 'after_sync' }),
     )
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   })

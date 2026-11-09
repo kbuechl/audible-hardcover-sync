@@ -238,22 +238,23 @@ folder.
 
 ## Review
 
-Every book you've started on Audible syncs by default. If the Audible
-account is shared with others, choose what happens under **Setup →
+Your own books sync automatically, but books shared into your Audible
+account (which may have been listened to by someone else in the household)
+wait for your review out of the box. Choose what happens under **Setup →
 Preferences → Which books to sync**:
 
 | Mode | Your own books | Shared books |
 |---|---|---|
-| Sync everything (default) | sync | sync |
+| Sync everything | sync | sync |
 | Skip shared books | sync | left out, no messages |
-| Confirm shared books | sync | wait on the Review page |
+| Confirm shared books (default) | sync | wait on the Review page |
 | Confirm every book | wait on the Review page | wait on the Review page |
 
 Audible marks books shared from another account, but not whose they are,
-so "shared" means any book shared into yours. Upgrading keeps **Sync
-everything**, and changing the mode only affects books you haven't decided
-on: books already synced keep syncing and nothing is removed from
-Hardcover.
+so "shared" means any book shared into yours. Upgrading switches to
+**Confirm shared books**: only new shared books wait. Changing the mode
+only affects books you haven't decided on: books already synced keep
+syncing and nothing is removed from Hardcover.
 
 The **Review** page has three lists: **Waiting**, **Synced** and **Not
 wanted**, with title search and select-all for bulk choices.

@@ -188,7 +188,7 @@ func TestPreferences(t *testing.T) {
 func TestPreferences_SyncModeAndReviewNotify(t *testing.T) {
 	a := newTestApp(t, nil)
 	p, err := a.Preferences()
-	if err != nil || p.SyncMode != "all" || p.ReviewNotify != "after_sync" {
+	if err != nil || p.SyncMode != "confirm_shared" || p.ReviewNotify != "after_sync" {
 		t.Fatalf("defaults = %+v, %v", p, err)
 	}
 	base := state.Preferences{SyncInterval: "30m", MatchConfidence: "strict"}
@@ -218,7 +218,7 @@ func TestPreferences_SyncModeAndReviewNotify(t *testing.T) {
 	if err := a.SavePreferences(base); err != nil {
 		t.Fatalf("save without new fields: %v", err)
 	}
-	if got, _ := a.Preferences(); got.SyncMode != "all" || got.ReviewNotify != "after_sync" {
+	if got, _ := a.Preferences(); got.SyncMode != "confirm_shared" || got.ReviewNotify != "after_sync" {
 		t.Errorf("empty values = %+v", got)
 	}
 }
@@ -239,7 +239,7 @@ func TestNotifyWaitingUsesSyncMode(t *testing.T) {
 	if err := a.store.SeeReviewBook(state.ReviewBook{ASIN: "A1", Status: state.StatusFinished}); err != nil {
 		t.Fatal(err)
 	}
-	// Saved mode "all" holds nothing; the sync ran with confirm_all.
+	// The saved (default) mode only holds shared books; the sync ran with confirm_all.
 	n := &countingNotifier{}
 	a.notifyWaiting(context.Background(), syncpkg.Deps{Notifier: n, SyncMode: "confirm_all"})
 	if len(n.review) != 1 || n.review[0] != 1 {
