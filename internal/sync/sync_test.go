@@ -1030,12 +1030,11 @@ func TestRun_PromotesWantToRead(t *testing.T) {
 			wantResult: Result{Synced: 1},
 		},
 		{
-			name:        "finished without a date clears the date Hardcover fills in",
-			item:        audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 100},
-			statusID:    hardcover.StatusWantToRead,
-			wantUpdate:  &upsertCall{statusID: hardcover.StatusRead},
-			wantCleared: []int64{200},
-			wantResult:  Result{Synced: 1},
+			name:       "finished without a date and no read identified clears nothing",
+			item:       audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 100},
+			statusID:   hardcover.StatusWantToRead,
+			wantUpdate: &upsertCall{statusID: hardcover.StatusRead},
+			wantResult: Result{Synced: 1},
 		},
 		{
 			name:       "Did Not Finish is left alone",
@@ -1192,8 +1191,8 @@ func TestRun_FinishTargetsTouchedRead(t *testing.T) {
 		wantFinished int64
 	}{
 		{"finished in place: open read cleared and recorded", []int64{400, 450}, []int64{450}, true, nil, []int64{450}, nil, 450},
-		{"no new and no open read: past read untouched, lookup fallback", []int64{400, 450}, nil, true, nil, nil, []int64{200}, 0},
-		{"prior reads unknown and no open read: lookup fallback", []int64{400}, nil, true, errors.New("down"), nil, []int64{200}, 0},
+		{"no new and no open read: no date cleared", []int64{400, 450}, nil, true, nil, nil, nil, 0},
+		{"prior reads unknown and no open read: no date cleared", []int64{400}, nil, true, errors.New("down"), nil, nil, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

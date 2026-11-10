@@ -208,7 +208,7 @@ func moveStatus(ctx context.Context, d Deps, item audible.LibraryItem, status st
 	// Hardcover lists a just-added read only after a short delay, so the
 	// read the status change touched is taken from its response: a read it
 	// created, else the open read it finished in place. Never a past read
-	// the user finished. The by-entry lookup is the fallback.
+	// the user finished. Progress falls back to the by-entry lookup.
 	var created []int64
 	if priorOK {
 		created = createdSince(priorReads, after)
@@ -225,13 +225,11 @@ func moveStatus(ctx context.Context, d Deps, item audible.LibraryItem, status st
 	switch {
 	case statusID == hardcover.StatusRead && userDate == nil:
 		// Hardcover fills in today when a book becomes Read without a date.
-		var err error
-		if readID != 0 {
-			err = d.Hardcover.ClearReadFinishDate(ctx, readID)
-		} else {
-			err = d.Hardcover.ClearFinishDate(ctx, existing.ID)
-		}
-		if err != nil {
+		// With no read identified, a wrong date beats guessing and
+		// touching one of the user's past reads.
+		if readID == 0 {
+			slog.Info("finish date left as Hardcover set it: no read identified", "asin", item.ASIN, "book_id", bookID)
+		} else if err := d.Hardcover.ClearReadFinishDate(ctx, readID); err != nil {
 			slog.Error("clear hardcover finish date", "asin", item.ASIN, "book_id", bookID, "error", err)
 		}
 	case status == state.StatusInProgress:
