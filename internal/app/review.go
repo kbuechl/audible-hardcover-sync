@@ -186,7 +186,7 @@ func (a *App) PreviewRemove(ctx context.Context, asin string) (RemovePreview, er
 		case state.ActionReadStarted:
 			p.Deletes = append(p.Deletes, "the re-listen read the sync started")
 		case state.ActionPromoted:
-			p.Deletes = append(p.Deletes, "the reads the sync added, and moves the book back to Want to Read")
+			p.Deletes = append(p.Deletes, "the reads the sync added, and moves the book back to "+statusName(acts[i].PrevStatusID))
 		case state.ActionInserted:
 			insert = &acts[i]
 		}
@@ -278,6 +278,14 @@ func (a *App) Remove(ctx context.Context, asin string) error {
 		return err
 	}
 	return a.store.SetDecision([]string{asin}, state.DecisionNotWanted)
+}
+
+// statusName is the shelf name Remove moves a promoted book back to.
+func statusName(statusID int) string {
+	if statusID == hardcover.StatusCurrentlyReading {
+		return "Currently Reading"
+	}
+	return "Want to Read"
 }
 
 // undo reverses one logged write.

@@ -33,6 +33,7 @@ type HardcoverClient interface {
 	UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error
 	FinishRead(ctx context.Context, readID int64, finishedAt time.Time) error
 	ClearFinishDate(ctx context.Context, userBookID int64) error
+	ClearReadFinishDate(ctx context.Context, readID int64) error
 	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error)
 	ReadIDs(ctx context.Context, userBookID int64) ([]int64, error)
 }

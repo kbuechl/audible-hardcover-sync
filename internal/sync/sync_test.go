@@ -59,6 +59,10 @@ type fakeHardcover struct {
 	insertRead bool
 	lateReads  map[int64]bool // read ids ReadIDs does not list yet
 	readIDsErr error          // returned by ReadIDs when set
+	// readProgress and clearedReads record writes by read id to reads
+	// StartRead did not open (reads a status change added).
+	readProgress map[int64]int
+	clearedReads []int64
 }
 
 type fakeRead struct {
@@ -84,6 +88,7 @@ func newFakeHardcover() *fakeHardcover {
 		existingReads:      map[int64][]int64{},
 		progressReads:      map[int64]int64{},
 		nextProgressReadID: 7000,
+		readProgress:       map[int64]int{},
 	}
 }
 
@@ -190,7 +195,19 @@ func (f *fakeHardcover) StartRead(ctx context.Context, userBookID int64, started
 }
 
 func (f *fakeHardcover) UpdateReadProgress(ctx context.Context, readID int64, progressSeconds int) error {
-	f.reads[readID].progressSeconds = progressSeconds
+	if f.progressErr != nil {
+		return f.progressErr
+	}
+	if r, ok := f.reads[readID]; ok {
+		r.progressSeconds = progressSeconds
+		return nil
+	}
+	f.readProgress[readID] = progressSeconds
+	return nil
+}
+
+func (f *fakeHardcover) ClearReadFinishDate(ctx context.Context, readID int64) error {
+	f.clearedReads = append(f.clearedReads, readID)
 	return nil
 }
 
@@ -526,20 +543,19 @@ func TestRun(t *testing.T) {
 			},
 		},
 		{
-			name: "book currently reading on hardcover is skipped, not upgraded",
+			name: "book currently reading on hardcover moves to read when finished",
 			items: []audible.LibraryItem{
 				{ASIN: "A14", ISBN13: "9780641723445", IsFinished: true, PercentComplete: 100},
 			},
 			byISBN: map[string]int64{"9780641723445": 777},
 			// Book 777 is Currently Reading (2) on Hardcover. Audible
-			// says finished → Read (3). The sync skips it entirely —
-			// existing entries are never modified, even for upgrades.
+			// says finished → the entry moves forward to Read (3).
 			userBooks: map[int64]hardcover.UserBook{
 				777: {ID: 500, BookID: 777, StatusID: 2},
 			},
 			check: func(t *testing.T, store *state.Store, fh *fakeHardcover, fn *fakeNotifier, result Result) {
-				if result.Unchanged != 1 {
-					t.Errorf("Unchanged = %d, want 1 (existing book must be skipped)", result.Unchanged)
+				if result.Synced != 1 || fh.statusUpdates[500].statusID != hardcover.StatusRead {
+					t.Errorf("result = %+v, status update = %+v, want synced to Read", result, fh.statusUpdates[500])
 				}
 				if len(fh.inserted) != 0 {
 					t.Errorf("expected no insert call for an existing book, got %v", fh.inserted)
@@ -1065,4 +1081,89 @@ func describeCall(c upsertCall) string {
 		out += " date=" + c.userDate.Format(time.RFC3339)
 	}
 	return out
+}
+
+// A book Currently Reading on Hardcover becomes Read once Audible says it
+// is finished. Read and Did Not Finish are never changed.
+func TestRun_FinishesCurrentlyReading(t *testing.T) {
+	const isbn = "9780641723445"
+	finishedAt := ptrTime("2026-10-01T12:00:00Z")
+	finished := audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 98, FinishedAt: finishedAt, Rating: intPtr(5)}
+	undated := audible.LibraryItem{ASIN: "A1", ISBN13: isbn, IsFinished: true, PercentComplete: 98}
+	tests := []struct {
+		name        string
+		item        audible.LibraryItem
+		statusID    int
+		wantUpdate  *upsertCall
+		wantCleared []int64
+		wantCreated []int64
+		wantResult  Result
+	}{
+		{"Currently Reading + finished becomes Read with date, no rating", finished, hardcover.StatusCurrentlyReading,
+			&upsertCall{statusID: hardcover.StatusRead, userDate: finishedAt}, nil, []int64{9001}, Result{Synced: 1}},
+		{"Currently Reading + finished without date clears the new read's date", undated, hardcover.StatusCurrentlyReading,
+			&upsertCall{statusID: hardcover.StatusRead}, []int64{9001}, []int64{9001}, Result{Synced: 1}},
+		{"Read is untouched", finished, hardcover.StatusRead, nil, nil, nil, Result{Unchanged: 1}},
+		{"Did Not Finish + finished is untouched", finished, hardcover.StatusDidNotFinish, nil, nil, nil, Result{Unchanged: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fh := newFakeHardcover()
+			fh.insertRead = true
+			fh.byISBN[isbn] = 777
+			fh.existingReads[200] = []int64{500}
+			fh.userBooks[777] = hardcover.UserBook{ID: 200, BookID: 777, StatusID: tt.statusID, LastReadDate: ptrTime("2025-01-01T00:00:00Z")}
+			store := newTestStore(t)
+
+			result, err := Run(context.Background(), Deps{Audible: &fakeAudible{items: []audible.LibraryItem{tt.item}}, Hardcover: fh, Store: store, Notifier: &fakeNotifier{}})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result != tt.wantResult {
+				t.Errorf("result = %+v, want %+v", result, tt.wantResult)
+			}
+			got, updated := fh.statusUpdates[200]
+			switch {
+			case tt.wantUpdate == nil && updated:
+				t.Errorf("status updated to %+v, want untouched", got)
+			case tt.wantUpdate != nil && !updated:
+				t.Errorf("status not updated, want %+v", *tt.wantUpdate)
+			case tt.wantUpdate != nil && describeCall(got) != describeCall(*tt.wantUpdate):
+				t.Errorf("status update = %s, want %s", describeCall(got), describeCall(*tt.wantUpdate))
+			}
+			if fmt.Sprint(fh.clearedReads) != fmt.Sprint(tt.wantCleared) || len(fh.clearedDates) != 0 {
+				t.Errorf("cleared reads = %v (by entry %v), want %v", fh.clearedReads, fh.clearedDates, tt.wantCleared)
+			}
+			acts, _ := store.Actions("A1")
+			if tt.wantUpdate == nil {
+				if len(acts) != 0 {
+					t.Errorf("actions = %+v, want none", acts)
+				}
+				return
+			}
+			act := onlyAction(t, store, "A1")
+			if act.Kind != state.ActionPromoted || act.PrevStatusID != hardcover.StatusCurrentlyReading ||
+				!slices.Equal(act.PriorReadIDs, []int64{500}) || !slices.Equal(act.CreatedReadIDs, tt.wantCreated) || act.Rating != nil {
+				t.Errorf("action = %+v, want promoted from Currently Reading creating %v", act, tt.wantCreated)
+			}
+		})
+	}
+}
+
+// Promoting to Currently Reading writes progress to the read the status
+// change returned, not one looked up afterwards (Hardcover lags).
+func TestRun_PromoteProgressUsesResponseRead(t *testing.T) {
+	const isbn = "9780641723445"
+	fh := newFakeHardcover()
+	fh.insertRead = true
+	fh.byISBN[isbn] = 777
+	fh.userBooks[777] = hardcover.UserBook{ID: 200, BookID: 777, StatusID: hardcover.StatusWantToRead, AudioSeconds: 20000}
+	item := audible.LibraryItem{ASIN: "A1", ISBN13: isbn, PercentComplete: 6, RuntimeSeconds: 10000}
+	runOnce(t, &fakeAudible{items: []audible.LibraryItem{item}}, fh, newTestStore(t))
+	if got := fh.readProgress[9001]; got != 1200 {
+		t.Errorf("progress on response read 9001 = %d, want 1200 (readProgress %v)", got, fh.readProgress)
+	}
+	if len(fh.progress) != 0 {
+		t.Errorf("SetReadProgress lookups = %v, want none", fh.progress)
+	}
 }

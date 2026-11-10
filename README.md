@@ -287,17 +287,18 @@ waiting books at once.
   falls back to a confidence-scored fuzzy title/author match. The fuzzy
   threshold is set under **Setup → Preferences**: Strict (0.95, default),
   Medium (0.75) or Loose (0.55).
-- **Existing entries are skipped.** If a book is already in your Hardcover
-  library as Read, Currently Reading or Did Not Finish, the sync will NOT
-  modify it:
+- **Existing entries only move forward.** If a book is already in your
+  Hardcover library, its status is never downgraded and Read or Did Not
+  Finish entries keep their status:
   - A book you read in print and marked Read will NOT be downgraded to
     Currently Reading when you start the audiobook on Audible.
   - A rating you set on Hardcover will NOT be overwritten by your Audible
     rating.
   - A finish date you set manually on Hardcover will NOT be overwritten.
-  - The one exception is listening progress: for a book that is Currently
-    Reading on Hardcover, progress is moved forward to match Audible on each
-    sync. It is never lowered, and nothing else about the entry changes.
+  - For a book that is Currently Reading on Hardcover, progress is moved
+    forward to match Audible on each sync (never lowered). When Audible
+    says you finished it, it becomes Read with your Audible finish date;
+    its rating is left as it is.
   - Want to Read is moved up once you start listening: to Currently
     Reading (with progress) while you listen, or to Read (with your Audible
     finish date and rating) if Audible says you finished it. Custom lists
