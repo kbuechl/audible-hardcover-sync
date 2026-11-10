@@ -136,6 +136,9 @@ func syncExisting(ctx context.Context, d Deps, item audible.LibraryItem, status 
 	if existing.StatusID == hardcover.StatusWantToRead {
 		return promoteWantToRead(ctx, d, item, status, existing, bookID)
 	}
+	// Before the re-listen branch: a Currently Reading entry with a tracked
+	// re-listen (moved off Read by hand) is finished by the status move,
+	// which finishes that open read in place and drops the tracking.
 	if existing.StatusID == hardcover.StatusCurrentlyReading && status == state.StatusFinished {
 		return finishCurrentlyReading(ctx, d, item, status, existing, bookID)
 	}
@@ -203,8 +206,21 @@ func moveStatus(ctx context.Context, d Deps, item audible.LibraryItem, status st
 	slog.Info("moved hardcover book forward", "title", item.Title, "book_id", bookID, "from", existing.StatusID, "to", statusID)
 
 	// Hardcover lists a just-added read only after a short delay, so the
-	// read the response returned is used; the lookup is the fallback.
-	readID := newestRead(after)
+	// read the status change touched is taken from its response: a read it
+	// created, else the open read it finished in place. Never a past read
+	// the user finished. The by-entry lookup is the fallback.
+	var created []int64
+	if priorOK {
+		created = createdSince(priorReads, after)
+	}
+	readID := newestRead(created)
+	var finishedInPlace int64
+	if readID == 0 {
+		readID = newestRead(intersect(existing.OpenReadIDs, after))
+		if statusID == hardcover.StatusRead {
+			finishedInPlace = readID
+		}
+	}
 	percent := item.PercentComplete
 	switch {
 	case statusID == hardcover.StatusRead && userDate == nil:
@@ -233,24 +249,30 @@ func moveStatus(ctx context.Context, d Deps, item audible.LibraryItem, status st
 		}
 	}
 	// A read SetReadProgress adds later is not claimed, so Remove leaves
-	// it (under-delete, safe).
-	// Without the reads from before the write, which reads are new is
-	// unknown, so none are claimed.
-	var created []int64
-	if priorOK {
-		created = createdSince(priorReads, after)
-	}
+	// it (under-delete, safe). Without the reads from before the write,
+	// which reads are new is unknown, so none are claimed. ReadID is the
+	// open read the move finished in place; Remove clears its finish date.
 	recordAction(d, state.SyncAction{
 		ASIN: item.ASIN, Kind: state.ActionPromoted, UserBookID: existing.ID,
 		PrevStatusID: existing.StatusID, PriorReadIDs: priorReads,
-		Rating: rating, CreatedReadIDs: created,
+		Rating: rating, CreatedReadIDs: created, ReadID: finishedInPlace,
 	})
 	persist(d, item, status, percent, bookID, nil)
 	return true
 }
 
-// newestRead is the highest read id, the one Hardcover's own "latest read"
-// lookup would pick; 0 when there are none.
+// intersect returns the ids in a that are also in b.
+func intersect(a, b []int64) []int64 {
+	var out []int64
+	for _, id := range a {
+		if slices.Contains(b, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// newestRead is the highest read id; 0 when there are none.
 func newestRead(ids []int64) int64 {
 	var newest int64
 	for _, id := range ids {

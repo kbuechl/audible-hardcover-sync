@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -136,6 +137,7 @@ type hardcoverRemover interface {
 	DeleteUserBook(ctx context.Context, userBookID int64) error
 	DeleteRead(ctx context.Context, readID int64) error
 	UpdateUserBookStatus(ctx context.Context, userBookID int64, statusID int, rating *int, userDate *time.Time) ([]int64, error)
+	ClearReadFinishDate(ctx context.Context, readID int64) error
 }
 
 func (a *App) remover() (hardcoverRemover, error) {
@@ -306,8 +308,14 @@ func undo(ctx context.Context, hc hardcoverRemover, act state.SyncAction) error 
 		if err != nil || d == nil {
 			return err // nil, nil: the entry is gone, nothing to move back
 		}
-		_, err = hc.UpdateUserBookStatus(ctx, act.UserBookID, act.PrevStatusID, nil, nil)
-		return err
+		if _, err := hc.UpdateUserBookStatus(ctx, act.UserBookID, act.PrevStatusID, nil, nil); err != nil {
+			return err
+		}
+		// The move finished the user's open read in place: reopen it.
+		if act.ReadID != 0 && slices.Contains(d.ReadIDs, act.ReadID) {
+			return hc.ClearReadFinishDate(ctx, act.ReadID)
+		}
+		return nil
 	}
 	return fmt.Errorf("unknown action kind %q", act.Kind)
 }

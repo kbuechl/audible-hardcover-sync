@@ -23,7 +23,7 @@ type SyncAction struct {
 	ASIN           string
 	Kind           ActionKind
 	UserBookID     int64
-	ReadID         int64
+	ReadID         int64 // read_started: the read opened; promoted: the open read finished in place
 	PrevStatusID   int
 	PriorReadIDs   []int64 // read ids present before the write
 	CreatedReadIDs []int64 // read ids the write created

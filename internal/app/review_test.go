@@ -189,6 +189,10 @@ func (f *fakeRemover) UpdateUserBookStatus(_ context.Context, id int64, statusID
 	return nil, f.step("status " + itoa(id) + " " + itoa(int64(statusID)))
 }
 
+func (f *fakeRemover) ClearReadFinishDate(_ context.Context, id int64) error {
+	return f.step("clear date " + itoa(id))
+}
+
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func intp(n int) *int { return &n }
@@ -274,6 +278,14 @@ func TestRemove(t *testing.T) {
 		{"finished from Currently Reading: back to Currently Reading",
 			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading, PriorReadIDs: []int64{5}}},
 			&hardcover.UserBookDetails{ReadIDs: []int64{5}}, "",
+			[]string{"status 200 2"}, false},
+		{"finished in place: status back, then the read's finish date cleared",
+			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading, PriorReadIDs: []int64{5}, ReadID: 5}},
+			&hardcover.UserBookDetails{ReadIDs: []int64{5}}, "",
+			[]string{"status 200 2", "clear date 5"}, false},
+		{"finished-in-place read since deleted: left alone",
+			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading, ReadID: 5}},
+			&hardcover.UserBookDetails{ReadIDs: []int64{}}, "",
 			[]string{"status 200 2"}, false},
 		{"promoted entry already gone: success",
 			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusWantToRead, CreatedReadIDs: []int64{11}}},
