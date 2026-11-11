@@ -138,6 +138,13 @@ func (c *Client) ClearFinishDate(ctx context.Context, userBookID int64) error {
 	return c.updateRead(ctx, readID, map[string]any{"finished_at": nil})
 }
 
+// ClearReadFinishDate removes the finish date from one read. Callers that
+// have the read id from a mutation response use it instead of
+// ClearFinishDate, whose lookup can miss a read Hardcover just added.
+func (c *Client) ClearReadFinishDate(ctx context.Context, readID int64) error {
+	return c.updateRead(ctx, readID, map[string]any{"finished_at": nil})
+}
+
 // ReadIDs returns the ids of every read on a user_book.
 func (c *Client) ReadIDs(ctx context.Context, userBookID int64) ([]int64, error) {
 	var out struct {

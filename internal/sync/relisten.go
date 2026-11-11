@@ -128,11 +128,19 @@ func continueRelisten(ctx context.Context, d Deps, item audible.LibraryItem, sta
 }
 
 // syncExisting handles a book that is already in the user's Hardcover
-// library. Its status, rating and dates are never changed; only progress
-// and re-listen reads are written. It reports whether Hardcover changed.
+// library. Status only moves forward (Want to Read up, Currently Reading to
+// Read on finish); Read and Did Not Finish keep their status, rating and
+// dates, getting only progress and re-listen reads. It reports whether
+// Hardcover changed.
 func syncExisting(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, prior *state.BookState, bookID int64) bool {
 	if existing.StatusID == hardcover.StatusWantToRead {
 		return promoteWantToRead(ctx, d, item, status, existing, bookID)
+	}
+	// Before the re-listen branch: a Currently Reading entry with a tracked
+	// re-listen (moved off Read by hand) is finished by the status move,
+	// which finishes that open read in place and drops the tracking.
+	if existing.StatusID == hardcover.StatusCurrentlyReading && status == state.StatusFinished {
+		return finishCurrentlyReading(ctx, d, item, status, existing, bookID)
 	}
 	if prior != nil && prior.RelistenReadID != nil {
 		return continueRelisten(ctx, d, item, status, existing, prior, bookID)
@@ -171,48 +179,102 @@ func persist(d Deps, item audible.LibraryItem, status state.Status, percent floa
 // Hardcover was updated. On failure nothing is recorded, so the next sync
 // retries.
 func promoteWantToRead(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64) bool {
-	statusID := hardcover.StatusCurrentlyReading
-	var rating *int
-	var userDate *time.Time
 	if status == state.StatusFinished {
-		statusID, rating, userDate = hardcover.StatusRead, item.Rating, item.FinishedAt
+		return moveStatus(ctx, d, item, status, existing, bookID, hardcover.StatusRead, item.Rating, item.FinishedAt)
 	}
+	return moveStatus(ctx, d, item, status, existing, bookID, hardcover.StatusCurrentlyReading, nil, nil)
+}
+
+// finishCurrentlyReading marks a book that is Currently Reading on
+// Hardcover as Read once Audible says it is finished, whoever set it to
+// Currently Reading. The rating is not sent: the entry may hold one the
+// user set, and the library listing does not say.
+func finishCurrentlyReading(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64) bool {
+	return moveStatus(ctx, d, item, status, existing, bookID, hardcover.StatusRead, nil, item.FinishedAt)
+}
+
+// moveStatus moves an existing entry forward to statusID, then sets
+// progress or clears the finish date Hardcover fills in, on the read the
+// status change returned. It logs the move so Remove can put the entry back.
+func moveStatus(ctx context.Context, d Deps, item audible.LibraryItem, status state.Status, existing hardcover.UserBook, bookID int64, statusID int, rating *int, userDate *time.Time) bool {
 	priorReads, priorOK := readIDs(ctx, d, item, existing.ID)
 	after, err := d.Hardcover.UpdateUserBookStatus(ctx, existing.ID, statusID, rating, userDate)
 	if err != nil {
-		slog.Error("move hardcover book off want to read", "asin", item.ASIN, "book_id", bookID, "error", err)
+		slog.Error("move hardcover book forward", "asin", item.ASIN, "book_id", bookID, "from", existing.StatusID, "to", statusID, "error", err)
 		return false
 	}
-	slog.Info("moved hardcover book off want to read", "title", item.Title, "book_id", bookID, "status", status)
+	slog.Info("moved hardcover book forward", "title", item.Title, "book_id", bookID, "from", existing.StatusID, "to", statusID)
 
+	// Hardcover lists a just-added read only after a short delay, so the
+	// read the status change touched is taken from its response: a read it
+	// created, else the open read it finished in place. Never a past read
+	// the user finished. Progress falls back to the by-entry lookup.
+	var created []int64
+	if priorOK {
+		created = createdSince(priorReads, after)
+	}
+	readID := newestRead(created)
+	var finishedInPlace int64
+	if readID == 0 {
+		readID = newestRead(intersect(existing.OpenReadIDs, after))
+		if statusID == hardcover.StatusRead {
+			finishedInPlace = readID
+		}
+	}
 	percent := item.PercentComplete
 	switch {
-	case status == state.StatusFinished && userDate == nil:
+	case statusID == hardcover.StatusRead && userDate == nil:
 		// Hardcover fills in today when a book becomes Read without a date.
-		if err := d.Hardcover.ClearFinishDate(ctx, existing.ID); err != nil {
+		// With no read identified, a wrong date beats guessing and
+		// touching one of the user's past reads.
+		if readID == 0 {
+			slog.Info("finish date left as Hardcover set it: no read identified", "asin", item.ASIN, "book_id", bookID)
+		} else if err := d.Hardcover.ClearReadFinishDate(ctx, readID); err != nil {
 			slog.Error("clear hardcover finish date", "asin", item.ASIN, "book_id", bookID, "error", err)
 		}
 	case status == state.StatusInProgress:
 		if secs := progressSeconds(item); secs > 0 {
-			if err := d.Hardcover.SetReadProgress(ctx, existing.ID, item.PercentComplete, secs); err != nil {
+			var err error
+			if readID != 0 {
+				err = d.Hardcover.UpdateReadProgress(ctx, readID, hardcoverSeconds(item, existing))
+			} else {
+				err = d.Hardcover.SetReadProgress(ctx, existing.ID, item.PercentComplete, secs)
+			}
+			if err != nil {
 				slog.Error("set hardcover progress", "asin", item.ASIN, "book_id", bookID, "error", err)
 				percent = 0 // retried on the next sync, like a new book
 			}
 		}
 	}
 	// A read SetReadProgress adds later is not claimed, so Remove leaves
-	// it (under-delete, safe).
-	// Without the reads from before the write, which reads are new is
-	// unknown, so none are claimed.
-	var created []int64
-	if priorOK {
-		created = createdSince(priorReads, after)
-	}
+	// it (under-delete, safe). Without the reads from before the write,
+	// which reads are new is unknown, so none are claimed. ReadID is the
+	// open read the move finished in place; Remove clears its finish date.
 	recordAction(d, state.SyncAction{
 		ASIN: item.ASIN, Kind: state.ActionPromoted, UserBookID: existing.ID,
-		PrevStatusID: hardcover.StatusWantToRead, PriorReadIDs: priorReads,
-		Rating: rating, CreatedReadIDs: created,
+		PrevStatusID: existing.StatusID, PriorReadIDs: priorReads,
+		Rating: rating, CreatedReadIDs: created, ReadID: finishedInPlace,
 	})
 	persist(d, item, status, percent, bookID, nil)
 	return true
+}
+
+// intersect returns the ids in a that are also in b.
+func intersect(a, b []int64) []int64 {
+	var out []int64
+	for _, id := range a {
+		if slices.Contains(b, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// newestRead is the highest read id; 0 when there are none.
+func newestRead(ids []int64) int64 {
+	var newest int64
+	for _, id := range ids {
+		newest = max(newest, id)
+	}
+	return newest
 }

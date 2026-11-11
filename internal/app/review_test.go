@@ -189,6 +189,10 @@ func (f *fakeRemover) UpdateUserBookStatus(_ context.Context, id int64, statusID
 	return nil, f.step("status " + itoa(id) + " " + itoa(int64(statusID)))
 }
 
+func (f *fakeRemover) ClearReadFinishDate(_ context.Context, id int64) error {
+	return f.step("clear date " + itoa(id))
+}
+
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func intp(n int) *int { return &n }
@@ -234,6 +238,9 @@ func TestPreviewRemove(t *testing.T) {
 		{"promoted keeps the entry, so nothing else goes", []state.SyncAction{promoted},
 			&hardcover.UserBookDetails{Rating: ptrFloat(2), HasReview: true, ReadIDs: []int64{5, 11}},
 			RemovePreview{Deletes: []string{"the reads the sync added, and moves the book back to Want to Read"}, AlsoDeletes: []string{}}},
+		{"finished from Currently Reading moves back", []state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading}},
+			&hardcover.UserBookDetails{ReadIDs: []int64{5}},
+			RemovePreview{Deletes: []string{"the reads the sync added, and moves the book back to Currently Reading"}, AlsoDeletes: []string{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -268,6 +275,18 @@ func TestRemove(t *testing.T) {
 			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusWantToRead, PriorReadIDs: []int64{5}, CreatedReadIDs: []int64{11}}},
 			&hardcover.UserBookDetails{ReadIDs: []int64{5, 11, 30}}, "",
 			[]string{"delete read 11", "status 200 1"}, false},
+		{"finished from Currently Reading: back to Currently Reading",
+			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading, PriorReadIDs: []int64{5}}},
+			&hardcover.UserBookDetails{ReadIDs: []int64{5}}, "",
+			[]string{"status 200 2"}, false},
+		{"finished in place: status back, then the read's finish date cleared",
+			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading, PriorReadIDs: []int64{5}, ReadID: 5}},
+			&hardcover.UserBookDetails{ReadIDs: []int64{5}}, "",
+			[]string{"status 200 2", "clear date 5"}, false},
+		{"finished-in-place read since deleted: left alone",
+			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusCurrentlyReading, ReadID: 5}},
+			&hardcover.UserBookDetails{ReadIDs: []int64{}}, "",
+			[]string{"status 200 2"}, false},
 		{"promoted entry already gone: success",
 			[]state.SyncAction{{Kind: state.ActionPromoted, UserBookID: 200, PrevStatusID: hardcover.StatusWantToRead, CreatedReadIDs: []int64{11}}},
 			nil, "",
